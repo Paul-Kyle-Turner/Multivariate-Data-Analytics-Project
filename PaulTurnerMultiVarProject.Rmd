@@ -1,0 +1,2748 @@
+---
+title: "Wisconsin Breast Cancer data exploration"
+author: "Paul Turner"
+date: "April 5, 2019"
+output: html_document
+---
+
+```{r setup}
+
+# Functions that Paul Turner created for quick use of many libraries
+source("TFunctions.R")
+
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+# Data
+Import data and remove the id col.  Seperate the data into the three groups that the data comes in (mean, standard error, worst).  All four sets of data will be tested against each other to determine best classifier.  Scaling and centering of the data will occur in this chunk and has been marked with a comment.  Data is of much different scales and should be scaled for this purpose.
+
+```{r}
+
+uniq.wd = c("M","B")
+uniq.wp = c("R","N")
+
+WD = read.csv2("BCWD.data", header = FALSE, sep = ",")
+WD = as.data.frame(WD[,-1])
+WD.class = WD[,1]
+WD.class.num = as.numeric(WD[,1]) - 1
+WD.class.col = ifelse(WD.class == "M", "orange", "green")
+WD = WD[,-1]
+WD.names = c("Radius", "Texture", "perimeter", "area", "smoothness", "compactness", "concavity", "concave points", "symmetry", "fractal dimension")
+
+WD.mean = WD[,1:10]
+names(WD.mean) = WD.names
+WD.se = WD[,11:20]
+WD.se.names = add.to.each.string(WD.names, " SE")
+names(WD.se) = WD.se.names
+WD.worst = WD[,21:30]
+WD.worst.names = add.to.each.string(WD.names, " Worst")
+names(WD.worst) = WD.worst.names
+names(WD) = c(WD.names, WD.se.names, WD.worst.names)
+
+WD = as.data.frame(apply(WD, 2, as.numeric))
+WD.mean = as.data.frame(apply(WD.mean, 2, as.numeric))
+WD.se = as.data.frame(apply(WD.se, 2, as.numeric))
+WD.worst = as.data.frame(apply(WD.worst, 2, as.numeric))
+
+GG.WD = cbind(WD.mean[,3:4], WD.mean[,7:8], WD.worst[,3:4], WD.worst[,8])
+GG2.WD = cbind(WD.mean[,"concave points"], WD.worst[,"area  Worst"], WD.worst[,"compactness  Worst"])
+
+WD = as.data.frame(scale(WD))
+WD.mean = as.data.frame(scale(WD.mean))
+WD.se = as.data.frame(scale(WD.se))
+WD.worst = as.data.frame(scale(WD.worst))
+GG.WD = as.data.frame(scale(GG.WD))
+GG2.WD = as.data.frame(scale(GG2.WD))
+
+GG.WD.clasi = cbind(WD.class, GG.WD)
+GG2.WD.clasi = cbind(WD.class, GG2.WD)
+colnames(GG2.WD) = c("concave points", "area worst", "compactness worst")
+
+WP = read.csv2("BCWP.data", header = FALSE, sep = ",")
+WP = as.data.frame(WP[,-1])
+WP = WP[!(WP$V35 == "?"),]
+WP.class = WP[,1]
+WP.class.num = as.numeric(WP.class) - 1
+WP.class.col = ifelse(WP.class == "R", "orange", "green")
+WP.class.time = WP[,2]
+WP = WP[,c(-1,-2)]
+WP.names = c("Radius", "Texture", "perimeter", "area", "smoothness", "compactness", "concavity", "concave points", "symmetry", "fractal dimension", "tumor size", "lymph node status")
+
+WP.mean = cbind(WP[,1:10], WP[,31:32])
+names(WP.mean) = WP.names
+WP.se = cbind(WP[,11:20], WP[,31:32])
+names(WP.se) = add.to.each.string(WP.names, " SE")
+WP.worst = cbind(WP[,21:30], WP[,31:32])
+names(WP.worst) = add.to.each.string(WP.names, " Worst")
+
+WP = as.data.frame(apply(WP, 2, as.numeric))
+WP.mean = as.data.frame(apply(WP.mean, 2, as.numeric))
+WP.se = as.data.frame(apply(WP.se, 2, as.numeric))
+WP.worst = as.data.frame(apply(WP.worst, 2, as.numeric))
+
+GG.WP = as.data.frame(cbind(WP.mean[,"smoothness"], WP.mean[,"fractal dimension"], WP.mean[,"lymph node status"],
+              WP.se[,"Texture  SE"], WP.se[,"concave points  SE"], WP.worst[,"smoothness  Worst"]))
+colnames(GG.WP) = c("smoothness", " fractal dimension", "lymph node", "texture se", "concave points se", "smoothness worst")
+
+WP = as.data.frame(scale(WP))
+WP.mean = as.data.frame(scale(WP.mean))
+WP.se = as.data.frame(scale(WP.se))
+WP.worst = as.data.frame(scale(WP.worst))
+GG.WP = as.data.frame(scale(GG.WP))
+
+GG.WP.clasi = cbind(WP.class, GG.WP)
+
+
+```
+
+## Glimpse of data
+
+The data is broken into three different groups of ten real-valued features :
+  a) radius (mean of distances from center to points on the perimeter)
+  b) texture (standard deviation of gray-scale values)
+  c) perimeter
+  d) area
+  e) smoothness (local variation in radius lengths)
+  f) compactness (perimeter^2 / area - 1.0)
+  g) concavity (severity of concave portions of the contour)
+  h) concave points (number of concave portions of the contour)
+  i) symmetry 
+  j) fractal dimension ("coastline approximation" - 1)
+  
+Each dataset includes these variables.  It is important to note that there is a large correlation between a few of these points, radius, and area / perimeter are two.
+
+```{r}
+
+#WD Data summary
+#summary(WD)
+summary(WD.mean)
+
+```
+
+The WP dataset also has the values tumor size and lymph node status.  Lymph node status is defined as the number of lymph nodes that are also found to have cancer cells within.
+
+```{r}
+
+#WP Data summary
+#summary(WP)
+summary(WP.mean)
+
+```
+
+### Diagnostic data
+
+Basic plot are created to see some of the data distribution and if there is a good visual indicator for an algorithm to use.  It is to be noted that area and perimeter are very correlated with the radius.
+
+```{r}
+
+sample.tbl.col.func(WD.mean, WD.class.col, pairs)
+
+```
+
+Stars plot reveals that majority of the Benign cells have smaller quantities then the Malignant.
+
+```{r}
+
+stars(WD.mean[1:55,], labels = as.character(WD.class[1:55]), key.loc = c(20,1.5), draw.segments = TRUE, main = "Wisconsic Diagnostic Stars")
+
+```
+
+```{r}
+
+# Dimensions are correlated.
+# As you may notice Radius has a large correlation with area and perimeter.
+
+ggcorr(WD.mean)
+
+```
+
+The parallel coordinate graphs for the data reveal that mean and worst data sets have good seperation on radius, area, parimeter, concave points, and concavity.
+
+```{r}
+
+plot.square(k = 4)
+seed()
+sample.tbl.col.func(WD, WD.class.col, parcoord, percent = .2, main = "Parco graph of Diagnostic total data")
+seed()
+sample.tbl.col.func(WD.mean, WD.class.col, parcoord, main = "Parco graph of Diagnostic Mean data")
+seed()
+sample.tbl.col.func(WD.se, WD.class.col, parcoord, main = "Parco graph of Diagnostic SE data")
+seed()
+sample.tbl.col.func(WD.worst, WD.class.col, parcoord, main = "Parco graph of Diagnostic Worst data")
+
+
+
+```
+
+```{r}
+
+seed()
+sample.tbl.col.func(WD.mean, WD.class.col, parcoord, main = "Parco graph of Diagnostic Mean data")
+
+
+```
+
+Diagnostic worst data may have better seperation then the mean data alone and several different variables may be choosen for the final classifier.
+
+```{r}
+
+seed()
+sample.tbl.col.func(WD.worst, WD.class.col, parcoord, main = "Parco graph of Diagnostic Worst data")
+
+```
+
+### Prognostic data
+
+The prognostic dataset does not have as good a seperation my just a visual analysis of the data.  It also has some of the same correlation that the Diagnostic data set has.
+
+```{r}
+
+sample.tbl.col.func(WP.mean, WP.class.col, pairs)
+
+```
+
+Stars plot confirms from a visual analysis that the data for recurrent and nonrecurrent look very similar.
+
+```{r}
+
+stars(WP.mean[1:55,], labels = as.character(WP.class[1:55]), key.loc = c(20,1.5), draw.segments = TRUE, main = "Widconsin Prognostic Stars")
+
+```
+
+```{r}
+
+ggcorr(WP.mean)
+
+```
+
+Parallel coordinate plots of the data show that there is not good seperation anywhere in the data, from just a few of the variables.
+
+```{r}
+
+plot.square(k = 4)
+seed()
+sample.tbl.col.func(WP, WP.class.col, parcoord, percent = .2, main = "Parco graph of Prognostic total data")
+seed()
+sample.tbl.col.func(WP.mean, WP.class.col, parcoord, main = "Parco graph of Prognostic Mean data")
+seed()
+sample.tbl.col.func(WP.se, WP.class.col, parcoord, main = "Parco graph of Prognostic SE data")
+seed()
+sample.tbl.col.func(WP.worst, WP.class.col, parcoord, main = "Parco graph of Prognostic Worst data")
+
+```
+
+```{r}
+
+seed()
+sample.tbl.col.func(WP.mean, WP.class.col, parcoord, main = "Parco graph of Prognostic Mean data")
+
+```
+
+# Dimensional Reduction
+
+## PCA analysis
+
+```{r}
+
+# Done all in one chunk for the simplicity of Global Environment.
+
+WP.pca = princomp(WP, cor = TRUE)
+WP.pca.mean = princomp(WP.mean, cor = TRUE)
+WP.pca.se = princomp(WP.se, cor = TRUE)
+WP.pca.worst = princomp(WP.worst, cor = TRUE)
+
+WD.pca = princomp(WD, cor = TRUE)
+WD.pca.mean = princomp(WD.mean, cor = TRUE)
+WD.pca.se = princomp(WD.se, cor = TRUE)
+WD.pca.worst = princomp(WD.worst, cor = TRUE)
+
+```
+
+
+### Diagnostic Dataset
+
+Principle component analysis can provide a dimensional reduction such that the data can be visualized. Algorithms for classification can then be used on either the dimensionally reduced data or used on the higher dimensional data with the knowledge that the pca will be a recreation of the data with with noncorrelated variables.
+
+```{r}
+
+print(WD.pca$loadings, cutoff = .2)
+
+summary(WD.pca)
+
+```
+
+```{r}
+
+print(WD.pca.mean$loadings, cutoff = .3)
+
+summary(WD.pca.mean)
+
+```
+
+```{r}
+
+summary(WD.pca.se)
+
+```
+
+```{r}
+
+print(WD.pca.worst$loadings, cutoff = .3)
+
+summary(WD.pca.worst)
+
+```
+  
+These scree plots show a quick view of the cummulative variance for each of the data sets used.  The smaller data sets jump to a cummulative variance value that is well above acceptable whereas the larger data set struggles to reach even 70% cummulative variance in the first three PC.  
+
+```{r}
+
+plot.square(k = 4)
+plot.pca.scree(pca = WD.pca, ylab = "Cumulative variance", xlab = "PC", main = "Total WD data")
+plot.pca.scree(pca = WD.pca.mean, ylab = "Cumulative variance", xlab = "PC", main = "Mean WD data")
+plot.pca.scree(pca = WD.pca.se, ylab = "Cumulative variance", xlab = "PC", main = "SE WD data")
+plot.pca.scree(pca = WD.pca.worst, ylab = "Cumulative variance", xlab = "PC", main = "Worst WD data")
+
+```
+
+Bubble and 3d plots are created for this data to see a dipiction the structure of the data.  The undernearth code block is the method for creating the bubble plot without the defined plot.pca.bubble function.
+
+```{r}
+
+plot.pca.bubble(WD.mean, WD.class.col, WD.pca.mean, havetext = TRUE, main = "WD.mean")
+
+```
+
+```{r}
+
+plot.square(k = 4)
+plot.pca.bubble(WD, WD.class.col, WD.pca, main = "WD")
+plot.pca.bubble(WD.mean, WD.class.col, WD.pca.mean, main = "WD.mean")
+plot.pca.bubble(WD.se, WD.class.col, WD.pca.se, main = "WD.worst")
+plot.pca.bubble(WD.worst, WD.class.col, WD.pca.worst, main = "WD.worst")
+
+```
+
+The bubble plot that is created is too full and contains to many observations to determine what is happening in the plot.  The data will be shuffled and 30% of the data will be displayed by taking a sample of the data.
+
+```{r}
+
+WD.B = WD[WD.class == "B",]
+WD.M = WD[WD.class == "M",]
+
+WD.B.sample = sample.tbl.return(WD.B, percent = .3)
+WD.M.sample = sample.tbl.return(WD.M, percent = .3)
+
+```
+
+```{r}
+
+plot.samples(WD.B.sample, WD.M.sample, plot.pca.bubble)
+
+```
+
+Three dimensional graphs can deliver a better picture of first few PC.
+
+```{r}
+
+plot.pca.3d(WD, WD.class.col)
+
+```
+
+Principle component analysis of the dataset concludes that clustering of the diagnostic data set can be achieved and fruitful.
+
+### Prognostic data set
+
+The full WP data set does not reach 70% cummulative variance in the first few principle components and mearly reachs 56% in the second PC.
+
+```{r}
+
+summary(WP.pca)
+
+```
+
+We again see that radius area parimeter, compactness, concavity, and concave points are correlated.  While radius, perimeter, area, are opposite to the smoothness, symmetry, and fractal dimensions.  We also notice that with our prognostic data set the addition of the tumor size and lymph node variables are correlated in the third PC.
+
+```{r}
+
+print(WP.pca.mean$loadings, cutoff = .3)
+
+summary(WP.pca.mean)
+
+```
+
+```{r}
+
+summary(WP.pca.se)
+
+```
+
+```{r}
+
+summary(WP.pca.worst)
+
+```
+
+Scree plots on average show a lower cummulative variance then the WD dataset across all 4 sets.
+
+```{r}
+
+plot.square(k = 4)
+plot.pca.scree(pca = WP.pca, ylab = "Cumulative variance", xlab = "PC", main = "Total WP data")
+plot.pca.scree(pca = WP.pca.mean, ylab = "Cumulative variance", xlab = "PC", main = "Mean WP data")
+plot.pca.scree(pca = WP.pca.se, ylab = "Cumulative variance", xlab = "PC", main = "SE WP data")
+plot.pca.scree(pca = WP.pca.worst, ylab = "Cumulative variance", xlab = "PC", main = "Worst WP data")
+
+```
+
+The use of the plot.pca functions and the sample functions will be used for the principle component analysis of the prognostic data set.  The prognostic data set does not have good clusters however just like the Diagnostic data set the there is a large amount of data that is cluttering the bubble plot.
+
+```{r}
+
+plot.pca.bubble(WP.mean, WP.class.col, pca = WP.pca.mean, main = "WP Mean")
+
+```
+
+None of these bubble plots create any good seperation in the data.
+
+```{r}
+
+plot.square(k = 4)
+plot.pca.bubble(WP, WP.class.col, WP.pca)
+plot.pca.bubble(WP.mean, WP.class.col, WP.pca.mean)
+plot.pca.bubble(WP.se, WP.class.col, WP.pca.se)
+plot.pca.bubble(WP.worst, WP.class.col, WP.pca.worst)
+
+```
+
+Taking the first three PC only provides a similar result with non-recurring and recurring cancers appearing to be populated all throughout the plot.
+
+```{r}
+
+plot.pca.3d(WP, WP.class.col)
+
+```
+
+The prognostic data set also does not plot well in the three dimensional space.  The Principle component analysis of this data reveals that a clustering approach may not work well with prognostic data set, however it may work much better then a linear seperator.
+
+## Stochastic Neighborhood Embedding
+
+Stochastic Neighbor Embedding a method of dimensional reduction that uses the distances between variables as a probability (dissimilatrity).  SNE uses the dissimilarities generated from the distances and computes a low-dimensional expression of the data by minimizing a cost function.  The cost function used is the sum of the kullback-leibler divergences.  SNE is an iterative learning method for dimensional reduction and thus changing any of the parameters can present much different representations of the data in low dimensional space.  SNE provides a method of dimensional reduction that is based on the probable neighbors assosiated with each observation.
+
+### Diagnostic Data
+
+The do.sne function can produce a SNE of a given matrix or dataframe.  The SNE trys to maintain the neighborhoods of the observations in high dimensional space.  The following implementation is created with .9 cummulative variance pca.  Scaled and cenetered input is nessecary.
+
+```{r}
+
+seed()
+
+WD.sne = do.sne(WD, pca = TRUE, pcascale = TRUE)
+
+plot(WD.sne$Y, col = WD.class.col, main = "WD")
+
+```
+
+```{r}
+
+seed()
+
+WD.sne.mean = do.sne(WD.mean, pca = TRUE, pcascale = TRUE)
+
+plot(WD.sne.mean$Y, col = WD.class.col, main = "WD Mean")
+
+```
+
+```{r}
+
+seed()
+
+WD.sne.se = do.sne(WD.se, pca = TRUE, pcascale = TRUE)
+
+plot(WD.sne.se$Y, col = WD.class.col, main = "WD se")
+
+```
+
+```{r}
+
+seed()
+
+WD.sne.worst = do.sne(WD.worst, pca = TRUE, pcascale = TRUE)
+
+plot(WD.sne.worst$Y, col = WD.class.col, main = "worst")
+
+```
+
+The change is pc ratio used for the stochastic neighborhood embedding changes the shape of the data somewhat however if most of the variance is captured by the first few principle components then setting the cutoff below those lines would not change which PC were used for the final evaluation.  
+
+Mean WD data set with only 10 PC.
+
+```{r}
+
+WD.sne.list.pca.mean = plot.box.sne.pcar(WD.mean, WD.class.col, do.sne, pcascale = TRUE)
+
+```
+
+```{r}
+
+summary(WD.pca.mean)
+
+```
+
+WD data set with 30 PC.  Notice that there is a larger variation of graph from the WD.mean segment.
+
+```{r}
+
+WD.sne.list.pca = plot.box.sne.pcar(WD, WD.class.col, do.sne, pcascale = TRUE)
+
+```
+
+```{r}
+
+summary(WD.pca)
+
+```
+
+The change of perplexity does not effect the general structure of the data in a large amount.  It does push observations closer together, and seperates clusters of smallers sizes away from each other.
+
+Mean data does not have a good low perplexity SNE.  There are many points that are on a noise divide between the two populations.
+
+```{r}
+
+seed()
+
+WD.sne.perp.low.mean = do.sne(WD.mean, pca = TRUE, perplexity = 5, pcascale = TRUE)
+
+plot(WD.sne.perp.low.mean$Y, col = WD.class.col)
+
+```
+
+```{r}
+
+WD.sne.list.perp.mean = plot.box.sne.perp(WD.mean, WD.class.col, do.sne, starting = 5, ending = 50, pca = TRUE, pcascale = TRUE)
+
+```
+
+```{r}
+
+seed()
+
+WD.sne.perp.low.worst = do.sne(WD.worst, pca = TRUE, perplexity = 5, pcascale = TRUE)
+
+plot(WD.sne.perp.low.worst$Y, col = WD.class.col)
+
+```
+
+```{r}
+
+WD.sne.list.perp.worst = plot.box.sne.perp(WD.worst, WD.class.col, do.sne, starting = 5, ending = 50, pca = TRUE, pcascale = TRUE)
+
+```
+
+A low perplexity SNE of the larger data however produces a much better representation then the data with less variables.
+
+```{r}
+
+seed()
+
+WD.sne.perp.low = do.sne(WD, pca = TRUE, perplexity = 5, pcascale = TRUE)
+
+plot(WD.sne.perp.low$Y, col = WD.class.col)
+
+```
+
+```{r}
+
+WD.sne.list.perp = plot.box.sne.perp(WD, WD.class.col, do.sne, starting = 5, ending = 50, pca = TRUE, pcascale = TRUE)
+
+```
+
+### Prognostic Data
+
+SNE of the prognostic data set also does not provide good seperation.
+
+```{r, include=FALSE}
+
+seed()
+
+WP.sne = do.sne(WP, pca = TRUE, pcascale = TRUE)
+
+plot(WP.sne$Y, col = WP.class.col)
+
+```
+
+```{r}
+
+seed()
+
+WP.sne.mean = do.sne(WP.mean, pca = TRUE, pcascale = TRUE)
+
+plot(WP.sne.mean$Y, col = WP.class.col, main = "WP Mean")
+
+```
+
+```{r}
+
+seed()
+
+WP.sne.se = do.sne(WP.se, pca = TRUE, pcascale = TRUE)
+
+plot(WP.sne.se$Y, col = WP.class.col)
+
+```
+
+```{r}
+
+seed()
+
+WP.sne.worst = do.sne(WP.worst, pca = TRUE, pcascale = TRUE)
+
+plot(WP.sne.worst$Y, col = WP.class.col)
+
+```
+
+Changing the PCA ratio also provides plots that are undesirable for the data.  The fifth pc is the last used in the SNE algorithm.
+
+```{r}
+
+WP.sne.list.pca.mean = plot.box.sne.pcar(WP.mean, WP.class.col, do.sne, pcascale = TRUE)
+
+```
+
+```{r}
+
+summary(WP.pca.mean)
+
+```
+
+Chaning the pca scale on the WP data set uses up until the ninth principle component.
+
+```{r}
+
+WP.sne.list.pca = plot.box.sne.pcar(WP, WP.class.col, do.sne, pcascale = TRUE)
+
+```
+
+```{r}
+
+summary(WP.pca)
+
+```
+
+Perhaps the recurrent groups will are at least near each other when we change the perpelexity.
+
+```{r}
+
+seed()
+
+WP.sne.perp.low = do.sne(WP, pca = TRUE, perplexity = 5, pcascale = TRUE)
+
+plot(WP.sne.perp.low$Y, col = WP.class.col)
+
+```
+
+```{r}
+
+WP.sne.list.perp = plot.box.sne.perp(WP, WP.class.col, do.sne, starting = 5, ending = 50, pca = TRUE, pcascale = TRUE)
+
+```
+
+```{r}
+
+seed()
+
+WP.sne.perp.low.mean = do.sne(WP.mean, pca = TRUE, perplexity = 5, pcascale = TRUE)
+
+plot(WP.sne.prep.low.mean$Y, col = WP.class.col)
+
+```
+
+```{r}
+
+WP.sne.list.perp.mean = plot.box.sne.perp(WP.mean, WP.class.col, do.sne, starting = 5, ending = 50, pca = TRUE, pcascale = TRUE)
+
+```
+
+
+## TSNE Dimensional reduction
+
+### Diagnostic Data
+
+TSNE similar to SNE however it is instead over the student-t distribution.  The heavy tails of the distrobution make the data seperate itself well to observations that are likely to be neighbors.
+
+The use of the BarnesHut approximation makes the TSNE algorithm much quicker then the SNE algorithm
+
+Note that with many of the examples the parameters have been tuned however the max iteration has only been changed on the methods used for classification later.
+
+```{r}
+
+seed()
+
+WD.tsne = do.tsne(WD, BarnesHut = TRUE, pcascale = TRUE)
+
+plot(WD.tsne$Y, col = WD.class.col)
+
+```
+
+```{r}
+
+WD.tsne.clasi = as.data.frame(cbind(WD.class, as.data.frame(WD.tsne$Y)))
+
+WD.tsne.lda = lda(formula = WD.tsne.clasi$WD.class ~ ., data = WD.tsne.clasi, CV = TRUE)
+WD.tsne.lda.pred = WD.tsne.lda$class
+WD.tsne.qda = qda(formula = WD.tsne.clasi$WD.class ~ ., data = WD.tsne.clasi, CV = TRUE)
+WD.tsne.qda.pred = na.omit(WD.tsne.qda$class)
+WD.tsne.lda.eq = lda(formula = WD.tsne.clasi$WD.class ~ ., data = WD.tsne.clasi, CV = TRUE, prior = c(1,1)/2)
+WD.tsne.lda.pred.eq = WD.tsne.lda.eq$class
+WD.tsne.qda.eq = qda(formula = WD.tsne.clasi$WD.class ~ ., data = WD.tsne.clasi, CV = TRUE, prior = c(1,1)/2)
+WD.tsne.qda.pred.eq = na.omit(WD.tsne.qda.eq$class)
+WD.tsne.lda.cor = acc.confusion.vec(WD.tsne.lda.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.tsne.qda.cor = acc.confusion.vec(WD.tsne.qda.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.tsne.lda.cor.eq = acc.confusion.vec(WD.tsne.lda.pred.eq, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.tsne.qda.cor.eq = acc.confusion.vec(WD.tsne.qda.pred.eq, WD.class, percent = TRUE, uniq = uniq.wd)
+
+WD.tsne.nn = knn.cv(WD.tsne$Y, WD.class, k = 1)
+
+WD.tsne.nn.cor = acc.confusion.vec(WD.tsne.nn, WD.class, percent = TRUE, uniq = uniq.wd)
+
+determine.k.cv(WD.tsne$Y, WD.class)
+
+WD.tsne.knn = knn.cv(WD.tsne$Y, WD.class, k = 3)
+
+WD.tsne.knn.cor = acc.confusion.vec(WD.tsne.knn, WD.class, percent = TRUE, uniq = uniq.wd)
+
+WD.tsne.clasi = as.data.frame(cbind(WD.class.num, WD.tsne$Y))
+
+WD.tsne.glm = glm(formula = WD.tsne.clasi$WD.class.num ~ ., data = WD.tsne.clasi, family = binomial())
+summary(WD.tsne.glm)
+
+WD.tsne.glm.pred = predict(WD.tsne.glm, neWPata = WD.tsne.clasi, type = "response")
+
+cutoff = .5
+WD.tsne.glm.pred = ifelse(WD.tsne.glm.pred < cutoff, "B", "M")
+WD.tsne.glm.pred = as.factor(WD.tsne.glm.pred)
+
+WD.tsne.glm.cor = acc.confusion.vec(WD.tsne.glm.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+
+name.methods = matrix(c(
+  "Linear", "Training", "NA",
+  "Linear", "Equal", "NA",
+  "Quadratic", "Training", "NA", 
+  "Quadratic", "Equal", "NA",
+  "Nearest N", "NA", "1",
+  "K Nearest", "NA", "3",
+  "Linear Re", "NA", "NA"
+  ), byrow = TRUE, nrow = 7, ncol = 3)
+
+WD.tsne.cor.df = as.data.frame(cbind(name.methods, rbind(WD.tsne.lda.cor, WD.tsne.lda.cor.eq, WD.tsne.qda.cor, WD.tsne.qda.cor.eq, WD.tsne.nn.cor, WD.tsne.knn.cor, WD.tsne.glm.cor)))
+
+colnames(WD.tsne.cor.df) = c("Type", "Priors","k", "M", "B", "Overall", "Total")
+
+```
+
+
+
+Mean data here creates an elongated group that contains malignant at the top right and bottom left.  There may exsist a good linear classifier however there does not see to be one.
+
+```{r}
+
+seed()
+
+WD.tsne.mean = do.tsne(WD.mean, BarnesHut = TRUE, pcascale = TRUE, perplexity = 25, maxiter = 2700)
+
+plot(WD.tsne.mean$Y, col = WD.class.col, main = "WD Mean")
+
+```
+
+```{r}
+
+WD.tsne.mean.clasi = as.data.frame(cbind(WD.class, as.data.frame(WD.tsne.mean$Y)))
+
+WD.tsne.mean.lda = lda(formula = WD.tsne.mean.clasi$WD.class ~ ., data = WD.tsne.mean.clasi, CV = TRUE)
+WD.tsne.mean.lda.pred = WD.tsne.mean.lda$class
+WD.tsne.mean.qda = qda(formula = WD.tsne.mean.clasi$WD.class ~ ., data = WD.tsne.mean.clasi, CV = TRUE)
+WD.tsne.mean.qda.pred = na.omit(WD.tsne.mean.qda$class)
+WD.tsne.mean.lda.eq = lda(formula = WD.tsne.mean.clasi$WD.class ~ ., data = WD.tsne.mean.clasi, CV = TRUE, prior = c(1,1)/2)
+WD.tsne.mean.lda.pred.eq = WD.tsne.mean.lda.eq$class
+WD.tsne.mean.qda.eq = qda(formula = WD.tsne.mean.clasi$WD.class ~ ., data = WD.tsne.mean.clasi, CV = TRUE, prior = c(1,1)/2)
+WD.tsne.mean.qda.pred.eq = na.omit(WD.tsne.mean.qda.eq$class)
+WD.tsne.mean.lda.cor = acc.confusion.vec(WD.tsne.mean.lda.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.tsne.mean.qda.cor = acc.confusion.vec(WD.tsne.mean.qda.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.tsne.mean.lda.cor.eq = acc.confusion.vec(WD.tsne.mean.lda.pred.eq, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.tsne.mean.qda.cor.eq = acc.confusion.vec(WD.tsne.mean.qda.pred.eq, WD.class, percent = TRUE, uniq = uniq.wd)
+
+WD.tsne.mean.nn = knn.cv(WD.tsne.mean$Y, WD.class, k = 1)
+
+WD.tsne.mean.nn.cor = acc.confusion.vec(WD.tsne.mean.nn, WD.class, percent = TRUE, uniq = uniq.wd)
+
+determine.k.cv(WD.tsne.mean$Y, WD.class)
+
+WD.tsne.mean.knn = knn.cv(WD.tsne.mean$Y, WD.class, k = 3)
+
+WD.tsne.mean.knn.cor = acc.confusion.vec(WD.tsne.mean.knn, WD.class, percent = TRUE, uniq = uniq.wd)
+
+WD.tsne.mean.clasi = as.data.frame(cbind(WD.class.num, WD.tsne$Y))
+
+WD.tsne.mean.glm = glm(formula = WD.tsne.mean.clasi$WD.class.num ~ ., data = WD.tsne.mean.clasi, family = binomial())
+summary(WD.tsne.mean.glm)
+
+WD.tsne.mean.glm.pred = predict(WD.tsne.mean.glm, neWPata = WD.tsne.mean.clasi, type = "response")
+
+cutoff = .5
+WD.tsne.mean.glm.pred = ifelse(WD.tsne.mean.glm.pred < cutoff, "B", "M")
+WD.tsne.mean.glm.pred = as.factor(WD.tsne.mean.glm.pred)
+
+WD.tsne.mean.glm.cor = acc.confusion.vec(WD.tsne.mean.glm.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+
+name.methods = matrix(c(
+  "Linear", "Training", "NA",
+  "Linear", "Equal", "NA",
+  "Quadratic", "Training", "NA", 
+  "Quadratic", "Equal", "NA",
+  "Nearest N", "NA", "1",
+  "K Nearest", "NA", "3",
+  "Linear Re", "NA", "NA"
+  ), byrow = TRUE, nrow = 7, ncol = 3)
+
+WD.tsne.mean.cor.df = as.data.frame(cbind(name.methods, rbind(WD.tsne.mean.lda.cor, WD.tsne.mean.lda.cor.eq, WD.tsne.mean.qda.cor, WD.tsne.mean.qda.cor.eq, WD.tsne.mean.nn.cor, WD.tsne.mean.knn.cor, WD.tsne.mean.glm.cor)))
+
+colnames(WD.tsne.mean.cor.df) = c("Type", "Priors","k", "M", "B", "Overall", "Total")
+
+```
+
+```{r}
+
+seed()
+
+WD.tsne.se = do.tsne(WD.se, BarnesHut = TRUE, pcascale = TRUE)
+
+plot(WD.tsne.se$Y, col = WD.class.col)
+
+```
+
+```{r}
+
+WD.tsne.se.clasi = as.data.frame(cbind(WD.class, as.data.frame(WD.tsne.se$Y)))
+
+WD.tsne.se.lda = lda(formula = WD.tsne.se.clasi$WD.class ~ ., data = WD.tsne.se.clasi, CV = TRUE)
+WD.tsne.se.lda.pred = WD.tsne.se.lda$class
+WD.tsne.se.qda = qda(formula = WD.tsne.se.clasi$WD.class ~ ., data = WD.tsne.se.clasi, CV = TRUE)
+WD.tsne.se.qda.pred = na.omit(WD.tsne.se.qda$class)
+WD.tsne.se.lda.eq = lda(formula = WD.tsne.se.clasi$WD.class ~ ., data = WD.tsne.se.clasi, CV = TRUE, prior = c(1,1)/2)
+WD.tsne.se.lda.pred.eq = WD.tsne.se.lda.eq$class
+WD.tsne.se.qda.eq = qda(formula = WD.tsne.se.clasi$WD.class ~ ., data = WD.tsne.se.clasi, CV = TRUE, prior = c(1,1)/2)
+WD.tsne.se.qda.pred.eq = na.omit(WD.tsne.se.qda.eq$class)
+WD.tsne.se.lda.cor = acc.confusion.vec(WD.tsne.se.lda.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.tsne.se.qda.cor = acc.confusion.vec(WD.tsne.se.qda.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.tsne.se.lda.cor.eq = acc.confusion.vec(WD.tsne.se.lda.pred.eq, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.tsne.se.qda.cor.eq = acc.confusion.vec(WD.tsne.se.qda.pred.eq, WD.class, percent = TRUE, uniq = uniq.wd)
+
+WD.tsne.se.nn = knn.cv(WD.tsne.se$Y, WD.class, k = 1)
+
+WD.tsne.se.nn.cor = acc.confusion.vec(WD.tsne.se.nn, WD.class, percent = TRUE, uniq = uniq.wd)
+
+determine.k.cv(WD.tsne.se$Y, WD.class)
+
+WD.tsne.se.knn = knn.cv(WD.tsne.se$Y, WD.class, k = 3)
+
+WD.tsne.se.knn.cor = acc.confusion.vec(WD.tsne.se.knn, WD.class, percent = TRUE, uniq = uniq.wd)
+
+WD.tsne.se.clasi = as.data.frame(cbind(WD.class.num, WD.tsne$Y))
+
+WD.tsne.se.glm = glm(formula = WD.tsne.se.clasi$WD.class.num ~ ., data = WD.tsne.se.clasi, family = binomial())
+summary(WD.tsne.se.glm)
+
+WD.tsne.se.glm.pred = predict(WD.tsne.se.glm, neWPata = WD.tsne.se.clasi, type = "response")
+
+cutoff = .5
+WD.tsne.se.glm.pred = ifelse(WD.tsne.se.glm.pred < cutoff, "B", "M")
+WD.tsne.se.glm.pred = as.factor(WD.tsne.se.glm.pred)
+
+WD.tsne.se.glm.cor = acc.confusion.vec(WD.tsne.se.glm.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+
+name.methods = matrix(c(
+  "Linear", "Training", "NA",
+  "Linear", "Equal", "NA",
+  "Quadratic", "Training", "NA", 
+  "Quadratic", "Equal", "NA",
+  "Nearest N", "NA", "1",
+  "K Nearest", "NA", "3",
+  "Linear Re", "NA", "NA"
+  ), byrow = TRUE, nrow = 7, ncol = 3)
+
+WD.tsne.se.cor.df = as.data.frame(cbind(name.methods, rbind(WD.tsne.se.lda.cor, WD.tsne.se.lda.cor.eq, WD.tsne.se.qda.cor, WD.tsne.se.qda.cor.eq, WD.tsne.se.nn.cor, WD.tsne.se.knn.cor, WD.tsne.se.glm.cor)))
+
+colnames(WD.tsne.se.cor.df) = c("Type", "Priors","k", "M", "B", "Overall", "Total")
+
+```
+
+
+
+The worst data being plotted shows quite a good linear seperation in the data, there are some small areas in which malignant data seperates poorly however overall this data fits well.
+
+```{r}
+
+seed()
+
+WD.tsne.worst = do.tsne(WD.worst, BarnesHut = TRUE, pcascale = TRUE)
+
+plot(WD.tsne.worst$Y, col = WD.class.col)
+
+```
+
+```{r}
+
+WD.tsne.worst.clasi = as.data.frame(cbind(WD.class, as.data.frame(WD.tsne.worst$Y)))
+
+WD.tsne.worst.lda = lda(formula = WD.tsne.worst.clasi$WD.class ~ ., data = WD.tsne.worst.clasi, CV = TRUE)
+WD.tsne.worst.lda.pred = WD.tsne.worst.lda$class
+WD.tsne.worst.qda = qda(formula = WD.tsne.worst.clasi$WD.class ~ ., data = WD.tsne.worst.clasi, CV = TRUE)
+WD.tsne.worst.qda.pred = na.omit(WD.tsne.worst.qda$class)
+WD.tsne.worst.lda.eq = lda(formula = WD.tsne.worst.clasi$WD.class ~ ., data = WD.tsne.worst.clasi, CV = TRUE, prior = c(1,1)/2)
+WD.tsne.worst.lda.pred.eq = WD.tsne.worst.lda.eq$class
+WD.tsne.worst.qda.eq = qda(formula = WD.tsne.worst.clasi$WD.class ~ ., data = WD.tsne.worst.clasi, CV = TRUE, prior = c(1,1)/2)
+WD.tsne.worst.qda.pred.eq = na.omit(WD.tsne.worst.qda.eq$class)
+WD.tsne.worst.lda.cor = acc.confusion.vec(WD.tsne.worst.lda.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.tsne.worst.qda.cor = acc.confusion.vec(WD.tsne.worst.qda.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.tsne.worst.lda.cor.eq = acc.confusion.vec(WD.tsne.worst.lda.pred.eq, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.tsne.worst.qda.cor.eq = acc.confusion.vec(WD.tsne.worst.qda.pred.eq, WD.class, percent = TRUE, uniq = uniq.wd)
+
+WD.tsne.worst.nn = knn.cv(WD.tsne.worst$Y, WD.class, k = 1)
+
+WD.tsne.worst.nn.cor = acc.confusion.vec(WD.tsne.worst.nn, WD.class, percent = TRUE, uniq = uniq.wd)
+
+determine.k.cv(WD.tsne.worst$Y, WD.class)
+
+WD.tsne.worst.knn = knn.cv(WD.tsne.worst$Y, WD.class, k = 3)
+
+WD.tsne.worst.knn.cor = acc.confusion.vec(WD.tsne.worst.knn, WD.class, percent = TRUE, uniq = uniq.wd)
+
+WD.tsne.worst.clasi = as.data.frame(cbind(WD.class.num, WD.tsne$Y))
+
+WD.tsne.worst.glm = glm(formula = WD.tsne.worst.clasi$WD.class.num ~ ., data = WD.tsne.worst.clasi, family = binomial())
+summary(WD.tsne.worst.glm)
+
+WD.tsne.worst.glm.pred = predict(WD.tsne.worst.glm, neWPata = WD.tsne.worst.clasi, type = "response")
+
+cutoff = .5
+WD.tsne.worst.glm.pred = ifelse(WD.tsne.worst.glm.pred < cutoff, "B", "M")
+WD.tsne.worst.glm.pred = as.factor(WD.tsne.worst.glm.pred)
+
+WD.tsne.worst.glm.cor = acc.confusion.vec(WD.tsne.worst.glm.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+
+name.methods = matrix(c(
+  "Linear", "Training", "NA",
+  "Linear", "Equal", "NA",
+  "Quadratic", "Training", "NA", 
+  "Quadratic", "Equal", "NA",
+  "Nearest N", "NA", "1",
+  "K Nearest", "NA", "3",
+  "Linear Re", "NA", "NA"
+  ), byrow = TRUE, nrow = 7, ncol = 3)
+
+WD.tsne.worst.cor.df = as.data.frame(cbind(name.methods, rbind(WD.tsne.worst.lda.cor, WD.tsne.worst.lda.cor.eq, WD.tsne.worst.qda.cor, WD.tsne.worst.qda.cor.eq, WD.tsne.worst.nn.cor, WD.tsne.worst.knn.cor, WD.tsne.worst.glm.cor)))
+
+colnames(WD.tsne.worst.cor.df) = c("Type", "Priors","k", "M", "B", "Overall", "Total")
+
+```
+
+
+
+#### Change PC for TSNE
+
+```{r}
+
+seed()
+
+WD.tsne.pca.no = do.tsne(WD, BarnesHut = TRUE, pca = FALSE, pcascale = TRUE)
+
+plot(WD.tsne.pca.no$Y, col = WD.class.col)
+
+```
+
+```{r}
+
+WD.tsne.list.pca.mean = plot.box.sne.pcar(WD.mean, WD.class.col, do.tsne, BarnesHut = TRUE, pcascale = TRUE)
+
+```
+
+```{r}
+
+summary(WD.pca.mean)
+
+```
+
+WP data set with 32 PC.
+
+```{r}
+
+WD.tsne.list.pca = plot.box.sne.pcar(WD, WD.class.col, do.tsne, BarnesHut = TRUE, pcascale = TRUE)
+
+```
+
+```{r}
+
+summary(WD.pca)
+
+```
+
+#### Perplexity For a moment
+
+Perplexity changes the data more so in tsne then it does in the sne becuase of the difference in distribution.  Something to note here is that nearest neighbor classification could be good for the classification of these observations.  In general the tsne clusters the alike malignant observations that happen to be within the larger structure of begnign observations.
+
+```{r}
+
+seed()
+
+WD.tsne.perp.low = do.tsne(WD, perplexity = 5, BarnesHut = TRUE, pcascale = TRUE)
+
+plot(WD.tsne.perp.low$Y, col = WD.class.col)
+
+```
+
+```{r}
+
+WD.tsne.list.perp = plot.box.sne.perp(WD, WD.class.col, do.tsne, starting = 5, ending = 50, BarnesHut = TRUE, pcascale = TRUE)
+
+```
+
+```{r}
+
+seed()
+
+WD.tsne.perp.low.mean = do.tsne(WD.mean, perplexity = 5, BarnesHut = TRUE, pcascale = TRUE, maxiter = 3100)
+
+plot(WD.tsne.perp.low.mean$Y, col = WD.class.col, main = "WD Mean")
+
+```
+
+```{r}
+
+WD.tsne.list.perp.mean = plot.box.sne.perp(WD.mean, WD.class.col, do.tsne, starting = 5, ending = 50, BarnesHut = TRUE, pcascale = TRUE, maxiter = 2600)
+
+```
+
+```{r}
+
+seed()
+
+WD.tsne.perp.low.worst = do.tsne(WD.worst, perplexity = 5, BarnesHut = TRUE, pcascale = TRUE)
+
+plot(WD.tsne.perp.low.worst$Y, col = WD.class.col)
+
+```
+
+```{r}
+
+WD.tsne.list.perp.worst = plot.box.sne.perp(WD.worst, WD.class.col, do.tsne, starting = 5, ending = 50, BarnesHut = TRUE, pcascale = TRUE)
+
+```
+
+We can see that the useage of a high perplexity creates larger clusters of observations.  
+
+```{r}
+
+seed()
+
+WD.tsne.perp.high = do.tsne(WD, perplexity = 50, BarnesHut = TRUE, pcascale = TRUE)
+
+plot(WD.tsne.perp.high$Y, col = WD.class.col)
+
+```
+
+#### Learning Rate
+
+```{r}
+
+WD.tsne.list.lr = plot.box.sne.lr(WD, WD.class.col, do.tsne, BarnesHut = TRUE, pcascale = TRUE, perplexity = 45)
+
+```
+
+```{r}
+
+WD.tsne.list.lr = plot.box.sne.lr(WD, WD.class.col, do.tsne, BarnesHut = TRUE, maxiter = 3000, pcascale = TRUE, perplexity = 25)
+
+```
+
+```{r}
+
+WD.tsne.list.lr = plot.box.sne.lr(WD, WD.class.col, do.tsne, BarnesHut = TRUE, maxiter = 5000, pcascale = TRUE, perplexity = 50)
+
+```
+
+#### 3d with tsne
+
+```{r}
+
+plot.sne.3d(WD, WD.class.col, sne.function = do.tsne, perplexity = 5, BarnesHut = TRUE, pcascale = TRUE)
+
+```
+
+```{r}
+
+plot.sne.3d(WD, WD.class.col, sne.function = do.tsne, perplexity = 50, BarnesHut = TRUE, pcascale = TRUE)
+
+```
+
+
+### Prognostic Data
+
+The normal tsne on the data from the prognostic dataset also does not provide good clusters or good linear seperation.
+
+```{r}
+
+seed()
+
+WP.tsne = do.tsne(WP, BarnesHut = TRUE, pcascale = TRUE, perplexity = 10, eta = .0675, maxiter = 3000)
+
+plot(WP.tsne$Y, col = WP.class.col)
+
+```
+```{r}
+
+WP.tsne.clasi = as.data.frame(cbind(WP.class, as.data.frame(WP.tsne$Y)))
+
+WP.tsne.lda = lda(formula = WP.tsne.clasi$WP.class ~ ., data = WP.tsne.clasi, CV = TRUE)
+WP.tsne.lda.pred = WP.tsne.lda$class
+WP.tsne.qda = qda(formula = WP.tsne.clasi$WP.class ~ ., data = WP.tsne.clasi, CV = TRUE)
+WP.tsne.qda.pred = na.omit(WP.tsne.qda$class)
+WP.tsne.lda.eq = lda(formula = WP.tsne.clasi$WP.class ~ ., data = WP.tsne.clasi, CV = TRUE, prior = c(1,1)/2)
+WP.tsne.lda.pred.eq = WP.tsne.lda.eq$class
+WP.tsne.qda.eq = qda(formula = WP.tsne.clasi$WP.class ~ ., data = WP.tsne.clasi, CV = TRUE, prior = c(1,1)/2)
+WP.tsne.qda.pred.eq = na.omit(WP.tsne.qda.eq$class)
+WP.tsne.lda.cor = acc.confusion.vec(WP.tsne.lda.pred, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.tsne.qda.cor = acc.confusion.vec(WP.tsne.qda.pred, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.tsne.lda.cor.eq = acc.confusion.vec(WP.tsne.lda.pred.eq, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.tsne.qda.cor.eq = acc.confusion.vec(WP.tsne.qda.pred.eq, WP.class, percent = TRUE, uniq = uniq.wp)
+
+WP.tsne.nn = knn.cv(WP.tsne$Y, WP.class, k = 1)
+
+WP.tsne.nn.cor = acc.confusion.vec(WP.tsne.nn, WP.class, percent = TRUE, uniq = uniq.wp)
+
+determine.k.cv(WP.tsne$Y, WP.class)
+
+WP.tsne.knn = knn.cv(WP.tsne$Y, WP.class, k = 3)
+
+WP.tsne.knn.cor = acc.confusion.vec(WP.tsne.knn, WP.class, percent = TRUE, uniq = uniq.wp)
+
+WP.tsne.clasi = as.data.frame(cbind(WP.class.num, WP.tsne$Y))
+
+WP.tsne.glm = glm(formula = WP.tsne.clasi$WP.class.num ~ ., data = WP.tsne.clasi, family = binomial())
+summary(WP.tsne.glm)
+
+WP.tsne.glm.pred = predict(WP.tsne.glm, neWPata = WP.tsne.clasi, type = "response")
+
+cutoff = .5
+WP.tsne.glm.pred = ifelse(WP.tsne.glm.pred < cutoff, "R", "N")
+WP.tsne.glm.pred = as.factor(WP.tsne.glm.pred)
+
+WP.tsne.glm.cor = acc.confusion.vec(WP.tsne.glm.pred, WP.class, percent = TRUE, uniq = uniq.wp)
+
+name.methods = matrix(c(
+  "Linear", "Training", "NA",
+  "Linear", "Equal", "NA",
+  "Quadratic", "Training", "NA", 
+  "Quadratic", "Equal", "NA",
+  "Nearest N", "NA", "1",
+  "K Nearest", "NA", "3",
+  "Linear Re", "NA", "NA"
+  ), byrow = TRUE, nrow = 7, ncol = 3)
+
+WP.tsne.cor.df = as.data.frame(cbind(name.methods, rbind(WP.tsne.lda.cor, WP.tsne.lda.cor.eq, WP.tsne.qda.cor, WP.tsne.qda.cor.eq, WP.tsne.nn.cor, WP.tsne.knn.cor, WP.tsne.glm.cor)))
+
+colnames(WP.tsne.cor.df) = c("Type", "Priors","k", "R", "N", "Overall", "Total")
+
+WP.tsne.cor.df
+
+```
+
+```{r}
+
+seed()
+
+WP.tsne.mean = do.tsne(WP.mean, BarnesHut = TRUE, pcascale = TRUE, perplexity = 10)
+
+plot(WP.tsne.mean$Y, col = WP.class.col, main = "WP Mean")
+
+```
+```{r}
+
+WP.tsne.mean.clasi = as.data.frame(cbind(WP.class, as.data.frame(WP.tsne.mean$Y)))
+
+WP.tsne.mean.lda = lda(formula = WP.tsne.mean.clasi$WP.class ~ ., data = WP.tsne.mean.clasi, CV = TRUE)
+WP.tsne.mean.lda.pred = WP.tsne.mean.lda$class
+WP.tsne.mean.qda = qda(formula = WP.tsne.mean.clasi$WP.class ~ ., data = WP.tsne.mean.clasi, CV = TRUE)
+WP.tsne.mean.qda.pred = na.omit(WP.tsne.mean.qda$class)
+WP.tsne.mean.lda.eq = lda(formula = WP.tsne.mean.clasi$WP.class ~ ., data = WP.tsne.mean.clasi, CV = TRUE, prior = c(1,1)/2)
+WP.tsne.mean.lda.pred.eq = WP.tsne.mean.lda.eq$class
+WP.tsne.mean.qda.eq = qda(formula = WP.tsne.mean.clasi$WP.class ~ ., data = WP.tsne.mean.clasi, CV = TRUE, prior = c(1,1)/2)
+WP.tsne.mean.qda.pred.eq = na.omit(WP.tsne.mean.qda.eq$class)
+WP.tsne.mean.lda.cor = acc.confusion.vec(WP.tsne.mean.lda.pred, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.tsne.mean.qda.cor = acc.confusion.vec(WP.tsne.mean.qda.pred, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.tsne.mean.lda.cor.eq = acc.confusion.vec(WP.tsne.mean.lda.pred.eq, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.tsne.mean.qda.cor.eq = acc.confusion.vec(WP.tsne.mean.qda.pred.eq, WP.class, percent = TRUE, uniq = uniq.wp)
+
+WP.tsne.mean.nn = knn.cv(WP.tsne.mean$Y, WP.class, k = 1)
+
+WP.tsne.mean.nn.cor = acc.confusion.vec(WP.tsne.mean.nn, WP.class, percent = TRUE, uniq = uniq.wp)
+
+determine.k.cv(WP.tsne.mean$Y, WP.class)
+
+WP.tsne.mean.knn = knn.cv(WP.tsne.mean$Y, WP.class, k = 3)
+
+WP.tsne.mean.knn.cor = acc.confusion.vec(WP.tsne.mean.knn, WP.class, percent = TRUE, uniq = uniq.wp)
+
+WP.tsne.mean.clasi = as.data.frame(cbind(WP.class.num, WP.tsne.mean$Y))
+
+WP.tsne.mean.glm = glm(formula = WP.tsne.mean.clasi$WP.class.num ~ ., data = WP.tsne.mean.clasi, family = binomial())
+summary(WP.tsne.mean.glm)
+
+WP.tsne.mean.glm.pred = predict(WP.tsne.mean.glm, neWPata = WP.tsne.mean.clasi, type = "response")
+
+cutoff = .5
+WP.tsne.mean.glm.pred = ifelse(WP.tsne.mean.glm.pred < cutoff, "R", "N")
+WP.tsne.mean.glm.pred = as.factor(WP.tsne.mean.glm.pred)
+
+WP.tsne.mean.glm.cor = acc.confusion.vec(WP.tsne.mean.glm.pred, WP.class, percent = TRUE, uniq = uniq.wp)
+
+name.methods = matrix(c(
+  "Linear", "Training", "NA",
+  "Linear", "Equal", "NA",
+  "Quadratic", "Training", "NA", 
+  "Quadratic", "Equal", "NA",
+  "Nearest N", "NA", "1",
+  "K Nearest", "NA", "3",
+  "Linear Re", "NA", "NA"
+  ), byrow = TRUE, nrow = 7, ncol = 3)
+
+WP.tsne.mean.cor.df = as.data.frame(cbind(name.methods, rbind(WP.tsne.mean.lda.cor, WP.tsne.mean.lda.cor.eq, WP.tsne.mean.qda.cor, WP.tsne.mean.qda.cor.eq, WP.tsne.mean.nn.cor, WP.tsne.mean.knn.cor, WP.tsne.mean.glm.cor)))
+
+colnames(WP.tsne.mean.cor.df) = c("Type", "Priors","k", "R", "N", "Overall", "Total")
+
+WP.tsne.mean.cor.df
+
+```
+
+```{r}
+
+seed()
+
+WP.tsne.se = do.tsne(WP.se, BarnesHut = TRUE, pcascale = TRUE)
+
+plot(WP.tsne.se$Y, col = WP.class.col)
+
+```
+```{r}
+
+WP.tsne.se.clasi = as.data.frame(cbind(WP.class, as.data.frame(WP.tsne.se$Y)))
+
+WP.tsne.se.lda = lda(formula = WP.tsne.se.clasi$WP.class ~ ., data = WP.tsne.se.clasi, CV = TRUE)
+WP.tsne.se.lda.pred = WP.tsne.se.lda$class
+WP.tsne.se.qda = qda(formula = WP.tsne.se.clasi$WP.class ~ ., data = WP.tsne.se.clasi, CV = TRUE)
+WP.tsne.se.qda.pred = na.omit(WP.tsne.se.qda$class)
+WP.tsne.se.lda.eq = lda(formula = WP.tsne.se.clasi$WP.class ~ ., data = WP.tsne.se.clasi, CV = TRUE, prior = c(1,1)/2)
+WP.tsne.se.lda.pred.eq = WP.tsne.se.lda.eq$class
+WP.tsne.se.qda.eq = qda(formula = WP.tsne.se.clasi$WP.class ~ ., data = WP.tsne.se.clasi, CV = TRUE, prior = c(1,1)/2)
+WP.tsne.se.qda.pred.eq = na.omit(WP.tsne.se.qda.eq$class)
+WP.tsne.se.lda.cor = acc.confusion.vec(WP.tsne.se.lda.pred, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.tsne.se.qda.cor = acc.confusion.vec(WP.tsne.se.qda.pred, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.tsne.se.lda.cor.eq = acc.confusion.vec(WP.tsne.se.lda.pred.eq, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.tsne.se.qda.cor.eq = acc.confusion.vec(WP.tsne.se.qda.pred.eq, WP.class, percent = TRUE, uniq = uniq.wp)
+
+WP.tsne.se.nn = knn.cv(WP.tsne.se$Y, WP.class, k = 1)
+
+WP.tsne.se.nn.cor = acc.confusion.vec(WP.tsne.se.nn, WP.class, percent = TRUE, uniq = uniq.wp)
+
+determine.k.cv(WP.tsne.se$Y, WP.class)
+
+WP.tsne.se.knn = knn.cv(WP.tsne.se$Y, WP.class, k = 3)
+
+WP.tsne.se.knn.cor = acc.confusion.vec(WP.tsne.se.knn, WP.class, percent = TRUE, uniq = uniq.wp)
+
+WP.tsne.se.clasi = as.data.frame(cbind(WP.class.num, WP.tsne.se$Y))
+
+WP.tsne.se.glm = glm(formula = WP.tsne.se.clasi$WP.class.num ~ ., data = WP.tsne.se.clasi, family = binomial())
+summary(WP.tsne.se.glm)
+
+WP.tsne.se.glm.pred = predict(WP.tsne.se.glm, neWPata = WP.tsne.se.clasi, type = "response")
+
+cutoff = .5
+WP.tsne.se.glm.pred = ifelse(WP.tsne.se.glm.pred < cutoff, "R", "N")
+WP.tsne.se.glm.pred = as.factor(WP.tsne.se.glm.pred)
+
+WP.tsne.se.glm.cor = acc.confusion.vec(WP.tsne.se.glm.pred, WP.class, percent = TRUE, uniq = uniq.wp)
+
+name.methods = matrix(c(
+  "Linear", "Training", "NA",
+  "Linear", "Equal", "NA",
+  "Quadratic", "Training", "NA", 
+  "Quadratic", "Equal", "NA",
+  "Nearest N", "NA", "1",
+  "K Nearest", "NA", "3",
+  "Linear Re", "NA", "NA"
+  ), byrow = TRUE, nrow = 7, ncol = 3)
+
+WP.tsne.se.cor.df = as.data.frame(cbind(name.methods, rbind(WP.tsne.se.lda.cor, WP.tsne.se.lda.cor.eq, WP.tsne.se.qda.cor, WP.tsne.se.qda.cor.eq, WP.tsne.se.nn.cor, WP.tsne.se.knn.cor, WP.tsne.se.glm.cor)))
+
+colnames(WP.tsne.se.cor.df) = c("Type", "Priors","k", "M", "B", "Overall", "Total")
+
+```
+
+
+```{r}
+
+seed()
+
+WP.tsne.worst = do.tsne(WP.worst, BarnesHut = TRUE, pcascale = TRUE)
+
+plot(WP.tsne.worst$Y, col = WP.class.col)
+
+```
+```{r}
+
+WP.tsne.worst.clasi = as.data.frame(cbind(WP.class, as.data.frame(WP.tsne.worst$Y)))
+
+WP.tsne.worst.lda = lda(formula = WP.tsne.worst.clasi$WP.class ~ ., data = WP.tsne.worst.clasi, CV = TRUE)
+WP.tsne.worst.lda.pred = WP.tsne.worst.lda$class
+WP.tsne.worst.qda = qda(formula = WP.tsne.worst.clasi$WP.class ~ ., data = WP.tsne.worst.clasi, CV = TRUE)
+WP.tsne.worst.qda.pred = na.omit(WP.tsne.worst.qda$class)
+WP.tsne.worst.lda.eq = lda(formula = WP.tsne.worst.clasi$WP.class ~ ., data = WP.tsne.worst.clasi, CV = TRUE, prior = c(1,1)/2)
+WP.tsne.worst.lda.pred.eq = WP.tsne.worst.lda.eq$class
+WP.tsne.worst.qda.eq = qda(formula = WP.tsne.worst.clasi$WP.class ~ ., data = WP.tsne.worst.clasi, CV = TRUE, prior = c(1,1)/2)
+WP.tsne.worst.qda.pred.eq = na.omit(WP.tsne.worst.qda.eq$class)
+WP.tsne.worst.lda.cor = acc.confusion.vec(WP.tsne.worst.lda.pred, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.tsne.worst.qda.cor = acc.confusion.vec(WP.tsne.worst.qda.pred, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.tsne.worst.lda.cor.eq = acc.confusion.vec(WP.tsne.worst.lda.pred.eq, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.tsne.worst.qda.cor.eq = acc.confusion.vec(WP.tsne.worst.qda.pred.eq, WP.class, percent = TRUE, uniq = uniq.wp)
+
+WP.tsne.worst.nn = knn.cv(WP.tsne.worst$Y, WP.class, k = 1)
+
+WP.tsne.worst.nn.cor = acc.confusion.vec(WP.tsne.worst.nn, WP.class, percent = TRUE, uniq = uniq.wp)
+
+determine.k.cv(WP.tsne.worst$Y, WP.class)
+
+WP.tsne.worst.knn = knn.cv(WP.tsne.worst$Y, WP.class, k = 3)
+
+WP.tsne.worst.knn.cor = acc.confusion.vec(WP.tsne.worst.knn, WP.class, percent = TRUE, uniq = uniq.wp)
+
+WP.tsne.worst.clasi = as.data.frame(cbind(WP.class.num, WP.tsne.worst$Y))
+
+WP.tsne.worst.glm = glm(formula = WP.tsne.worst.clasi$WP.class.num ~ ., data = WP.tsne.worst.clasi, family = binomial())
+summary(WP.tsne.worst.glm)
+
+WP.tsne.worst.glm.pred = predict(WP.tsne.worst.glm, neWPata = WP.tsne.worst.clasi, type = "response")
+
+cutoff = .5
+WP.tsne.worst.glm.pred = ifelse(WP.tsne.worst.glm.pred < cutoff, "N", "R")
+WP.tsne.worst.glm.pred = as.factor(WP.tsne.worst.glm.pred)
+
+WP.tsne.worst.glm.cor = acc.confusion.vec(WP.tsne.worst.glm.pred, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.tsne.worst.glm.cor
+
+name.methods = matrix(c(
+  "Linear", "Training", "NA",
+  "Linear", "Equal", "NA",
+  "Quadratic", "Training", "NA", 
+  "Quadratic", "Equal", "NA",
+  "Nearest N", "NA", "1",
+  "K Nearest", "NA", "3",
+  "Linear Re", "NA", "NA"
+  ), byrow = TRUE, nrow = 7, ncol = 3)
+
+WP.tsne.worst.cor.df = as.data.frame(cbind(name.methods, rbind(WP.tsne.worst.lda.cor, WP.tsne.worst.lda.cor.eq, WP.tsne.worst.qda.cor, WP.tsne.worst.qda.cor.eq, WP.tsne.worst.nn.cor, WP.tsne.worst.knn.cor, WP.tsne.worst.glm.cor)))
+
+colnames(WP.tsne.worst.cor.df) = c("Type", "Priors","k", "M", "B", "Overall", "Total")
+
+```
+
+#### Change PC for TSNE
+
+```{r}
+
+seed()
+
+WP.tsne.pca.no = do.tsne(WP, BarnesHut = TRUE, pca = FALSE, pcascale = TRUE)
+
+plot(WP.tsne.pca.no$Y, col = WP.class.col)
+
+```
+
+```{r}
+
+WP.tsne.list.pca.mean = plot.box.sne.pcar(WP.mean, WP.class.col, do.tsne, BarnesHut = TRUE, pcascale = TRUE)
+
+```
+
+```{r}
+
+summary(WP.pca.mean)
+
+```
+
+WP data set with 32 PC.
+
+```{r}
+
+WP.tsne.list.pca = plot.box.sne.pcar(WP, WP.class.col, do.tsne, BarnesHut = TRUE, pcascale = TRUE)
+
+```
+
+```{r}
+
+summary(WP.pca)
+
+```
+
+#### Perplexity For a moment
+
+```{r}
+
+seed()
+
+WP.tsne.perp.low = do.tsne(WP, perplexity = 5, BarnesHut = TRUE, pcascale = TRUE)
+
+plot(WP.tsne.perp.low$Y, col = WP.class.col)
+
+```
+
+```{r}
+
+WP.tsne.list.perp = plot.box.sne.perp(WP, WP.class.col, do.tsne, starting = 5, ending = 50, BarnesHut = TRUE, pcascale = TRUE)
+
+```
+
+```{r}
+
+seed()
+
+WP.tsne.perp.high = do.tsne(WP, perplexity = 50, BarnesHut = TRUE, pcascale = TRUE)
+
+plot(WP.tsne.perp.high$Y, col = WP.class.col)
+
+```
+
+```{r}
+
+seed()
+
+WP.tsne.perp.low.mean = do.tsne(WP.mean, perplexity = 5, BarnesHut = TRUE, pcascale = TRUE)
+
+plot(WP.tsne.perp.low.mean$Y, col = WP.class.col)
+
+```
+
+```{r}
+
+WP.tsne.list.perp.mean = plot.box.sne.perp(WP.mean, WP.class.col, do.tsne, starting = 5, ending = 50, BarnesHut = TRUE, pcascale = TRUE)
+
+```
+
+#### Learning rate
+
+```{r}
+
+WP.tsne.list.lr = plot.box.sne.lr(WP, WP.class.col, do.tsne, BarnesHut = TRUE, pcascale = TRUE, perplexity = 45)
+
+```
+
+```{r}
+
+WP.tsne.list.lr = plot.box.sne.lr(WP, WP.class.col, do.tsne, BarnesHut = TRUE, maxiter = 3000, pcascale = TRUE, perplexity = 50)
+
+```
+
+```{r}
+
+WP.tsne.list.lr = plot.box.sne.lr(WP, WP.class.col, do.tsne, BarnesHut = TRUE, maxiter = 5000, pcascale = TRUE, perplexity = 50)
+
+```
+
+#### 3d with tsne
+
+```{r}
+
+plot.sne.3d(WP, WP.class.col, sne.function = do.tsne, perplexity = 5, BarnesHut = TRUE, pcascale = TRUE)
+
+```
+
+```{r}
+
+plot.sne.3d(WP, WP.class.col, sne.function = do.tsne, perplexity = 50, BarnesHut = TRUE, pcascale = TRUE)
+
+```
+
+
+# Classification
+
+In the above code there are several different dimensional reductions used for the data, for simplicity data and pc scores will be used for dimensional reduction.
+
+Recombine data for use in formula
+
+```{r}
+
+WD.clasi = cbind(WD.class, WD)
+WD.clasi.mean = cbind(WD.class, WD.mean)
+WD.clasi.se = cbind(WD.class, WD.se)
+WD.clasi.worst = cbind(WD.class, WD.worst)
+
+WP.clasi = cbind(WP.class, WP)
+WP.clasi.mean = cbind(WP.class, WP.mean)
+WP.clasi.se = cbind(WP.class, WP.se)
+WP.clasi.worst = cbind(WP.class, WP.worst)
+
+```
+
+## Discriminant Analysis
+
+### Diagnostic Data
+
+Discriminant Analysis of the diagnostic data set show that the 
+
+```{r}
+
+# Diagnostic data
+
+# LDA
+
+WD.lda = lda(formula = WD.clasi$WD.class ~ ., data = WD.clasi, CV = TRUE)
+WD.lda.pred = WD.lda$class
+
+WD.lda.mean = lda(formula = WD.clasi.mean$WD.class ~ ., data = WD.clasi.mean, CV = TRUE)
+WD.lda.pred.mean = WD.lda.mean$class
+
+WD.lda.se = lda(formula = WD.clasi.se$WD.class ~ ., data = WD.clasi.se, CV = TRUE)
+WD.lda.pred.se = WD.lda.se$class
+
+WD.lda.worst = lda(formula = WD.clasi.worst$WD.class ~ ., data = WD.clasi.worst, CV = TRUE)
+WD.lda.pred.worst = WD.lda.worst$class
+
+# Proportional LDA
+
+WD.lda.eq = lda(formula = WD.clasi$WD.class ~ ., data = WD.clasi, CV = TRUE, prior = c(1,1)/2)
+WD.lda.pred.eq = WD.lda.eq$class
+
+WD.lda.mean.eq = lda(formula = WD.clasi.mean$WD.class ~ ., data = WD.clasi.mean, CV = TRUE, prior = c(1,1)/2)
+WD.lda.pred.mean.eq = WD.lda.mean.eq$class
+
+WD.lda.se.eq = lda(formula = WD.clasi.se$WD.class ~ ., data = WD.clasi.se, CV = TRUE, prior = c(1,1)/2)
+WD.lda.pred.se.eq = WD.lda.se.eq$class
+
+WD.lda.worst.eq = lda(formula = WD.clasi.worst$WD.class ~ ., data = WD.clasi.worst, CV = TRUE, prior = c(1,1)/2)
+WD.lda.pred.worst.eq = WD.lda.worst.eq$class
+
+#=======================
+
+# QDA
+
+WD.qda = qda(formula = WD.clasi$WD.class ~ ., data = WD.clasi, CV = TRUE)
+WD.qda.pred = na.omit(WD.qda$class)
+
+WD.qda.mean = qda(formula = WD.clasi.mean$WD.class ~ ., data = WD.clasi.mean, CV = TRUE)
+WD.qda.pred.mean = WD.qda.mean$class
+
+WD.qda.se = qda(formula = WD.clasi.se$WD.class ~ ., data = WD.clasi.se, CV = TRUE)
+WD.qda.pred.se = WD.qda.se$class
+
+WD.qda.worst = qda(formula = WD.clasi.worst$WD.class ~ ., data = WD.clasi.worst, CV = TRUE)
+WD.qda.pred.worst = WD.qda.worst$class
+
+# Proportional LDA
+
+WD.qda.eq = qda(formula = WD.clasi$WD.class ~ ., data = WD.clasi, CV = TRUE, prior = c(1,1)/2)
+WD.qda.pred.eq = na.omit(WD.qda.eq$class)
+
+WD.qda.mean.eq = qda(formula = WD.clasi.mean$WD.class ~ ., data = WD.clasi.mean, CV = TRUE, prior = c(1,1)/2)
+WD.qda.pred.mean.eq = WD.qda.mean.eq$class
+
+WD.qda.se.eq = qda(formula = WD.clasi.se$WD.class ~ ., data = WD.clasi.se, CV = TRUE, prior = c(1,1)/2)
+WD.qda.pred.se.eq = WD.qda.se.eq$class
+
+WD.qda.worst.eq = qda(formula = WD.clasi.worst$WD.class ~ ., data = WD.clasi.worst, CV = TRUE, prior = c(1,1)/2)
+WD.qda.pred.worst.eq = WD.qda.worst.eq$class
+
+#========================
+
+# Prediction
+
+WD.lda.cor = acc.confusion.vec(WD.lda.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.lda.cor.mean = acc.confusion.vec(WD.lda.pred.mean, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.lda.cor.se = acc.confusion.vec(WD.lda.pred.se, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.lda.cor.worst = acc.confusion.vec(WD.lda.pred.worst, WD.class, percent = TRUE, uniq = uniq.wd)
+
+WD.qda.cor = acc.confusion.vec(WD.qda.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.qda.cor.mean = acc.confusion.vec(WD.qda.pred.mean, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.qda.cor.se = acc.confusion.vec(WD.qda.pred.se, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.qda.cor.worst = acc.confusion.vec(WD.qda.pred.worst, WD.class, percent = TRUE, uniq = uniq.wd)
+
+WD.lda.cor.eq = acc.confusion.vec(WD.lda.pred.eq, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.lda.cor.mean.eq = acc.confusion.vec(WD.lda.pred.mean.eq, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.lda.cor.se.eq = acc.confusion.vec(WD.lda.pred.se.eq, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.lda.cor.worst.eq = acc.confusion.vec(WD.lda.pred.worst.eq, WD.class, percent = TRUE, uniq = uniq.wd)
+
+WD.qda.cor.eq = acc.confusion.vec(WD.qda.pred.eq, WD.clasi$WD.class, percent = TRUE, uniq = uniq.wd)
+WD.qda.cor.mean.eq = acc.confusion.vec(WD.qda.pred.mean, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.qda.cor.se.eq = acc.confusion.vec(WD.qda.pred.se.eq, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.qda.cor.worst.eq = acc.confusion.vec(WD.qda.pred.worst.eq, WD.class, percent = TRUE, uniq = uniq.wd)
+
+name.methods = matrix(c(
+  "Linear", "WD", "Training", "Linear", "WD.mean", "Training", "Linear", "WD.se", "Training", "Linear", "WD.worst", "Training",
+  "Linear", "WD", "Equal", "Linear", "WD.mean", "Equal", "Linear", "WD.se", "Equal", "Linear", "WD.worst", "Equal",
+  "Quadratic", "WD", "Training", "Quadratic", "WD.mean", "Training", "Quadratic", "WD.se", "Training", "Quadratic", "WD.worst", "Training",
+  "Quadratic", "WD", "Equal", "Quadratic", "WD.mean", "Equal", "Quadratic", "WD.se", "Equal", "Quadratic", "WD.worst", "Equal"
+  ), byrow = TRUE, nrow = 16, ncol = 3)
+
+WD.proportion.cor = as.data.frame(cbind(name.methods, rbind(WD.lda.cor, WD.lda.cor.mean, WD.lda.cor.se, WD.lda.cor.worst,
+                                                         WD.lda.cor.eq,WD.lda.cor.mean.eq,WD.lda.cor.se.eq,WD.lda.cor.worst.eq,
+                                                         WD.qda.cor,WD.qda.cor.mean,WD.qda.cor.se,WD.qda.cor.worst,
+                                                         WD.qda.cor.eq,WD.qda.cor.mean.eq,WD.qda.cor.se.eq,WD.qda.cor.worst.eq)))
+
+colnames(WD.proportion.cor) = c("DA Type", "Data set", "Priors", "M", "B", "Overall", "Total")
+
+WD.proportion.cor
+
+```
+
+### Prognostic Data
+
+Discriminant Analysis of the two data sets show that the 
+
+```{r}
+
+# Prognostic data
+
+# LDA
+
+WP.lda = lda(formula = WP.clasi$WP.class ~ ., data = WP.clasi, CV = TRUE)
+WP.lda.pred = WP.lda$class
+
+WP.lda.mean = lda(formula = WP.clasi.mean$WP.class ~ ., data = WP.clasi.mean, CV = TRUE)
+WP.lda.pred.mean = WP.lda.mean$class
+
+WP.lda.se = lda(formula = WP.clasi.se$WP.class ~ ., data = WP.clasi.se, CV = TRUE)
+WP.lda.pred.se = WP.lda.se$class
+
+WP.lda.worst = lda(formula = WP.clasi.worst$WP.class ~ ., data = WP.clasi.worst, CV = TRUE)
+WP.lda.pred.worst = WP.lda.worst$class
+
+# Proportional LDA
+
+WP.lda.eq = lda(formula = WP.clasi$WP.class ~ ., data = WP.clasi, CV = TRUE, prior = c(1,1)/2)
+WP.lda.pred.eq = WP.lda.eq$class
+
+WP.lda.mean.eq = lda(formula = WP.clasi.mean$WP.class ~ ., data = WP.clasi.mean, CV = TRUE, prior = c(1,1)/2)
+WP.lda.pred.mean.eq = WP.lda.mean.eq$class
+
+WP.lda.se.eq = lda(formula = WP.clasi.se$WP.class ~ ., data = WP.clasi.se, CV = TRUE, prior = c(1,1)/2)
+WP.lda.pred.se.eq = WP.lda.se.eq$class
+
+WP.lda.worst.eq = lda(formula = WP.clasi.worst$WP.class ~ ., data = WP.clasi.worst, CV = TRUE, prior = c(1,1)/2)
+WP.lda.pred.worst.eq = WP.lda.worst.eq$class
+
+#=======================
+
+# QDA
+
+WP.qda = qda(formula = WP.clasi$WP.class ~ ., data = WP.clasi, CV = TRUE)
+WP.qda.pred = na.omit(WP.qda$class)
+
+WP.qda.mean = qda(formula = WP.clasi.mean$WP.class ~ ., data = WP.clasi.mean, CV = TRUE)
+WP.qda.pred.mean = WP.qda.mean$class
+
+WP.qda.se = qda(formula = WP.clasi.se$WP.class ~ ., data = WP.clasi.se, CV = TRUE)
+WP.qda.pred.se = WP.qda.se$class
+
+WP.qda.worst = qda(formula = WP.clasi.worst$WP.class ~ ., data = WP.clasi.worst, CV = TRUE)
+WP.qda.pred.worst = WP.qda.worst$class
+
+# Proportional LDA
+
+WP.qda.eq = qda(formula = WP.clasi$WP.class ~ ., data = WP.clasi, CV = TRUE, prior = c(1,1)/2)
+WP.qda.pred.eq = na.omit(WP.qda.eq$class)
+
+WP.qda.mean.eq = qda(formula = WP.clasi.mean$WP.class ~ ., data = WP.clasi.mean, CV = TRUE, prior = c(1,1)/2)
+WP.qda.pred.mean.eq = WP.qda.mean.eq$class
+
+WP.qda.se.eq = qda(formula = WP.clasi.se$WP.class ~ ., data = WP.clasi.se, CV = TRUE, prior = c(1,1)/2)
+WP.qda.pred.se.eq = WP.qda.se.eq$class
+
+WP.qda.worst.eq = qda(formula = WP.clasi.worst$WP.class ~ ., data = WP.clasi.worst, CV = TRUE, prior = c(1,1)/2)
+WP.qda.pred.worst.eq = WP.qda.worst.eq$class
+
+#========================
+
+# Prognostic
+
+WP.lda.cor = acc.confusion.vec(WP.lda.pred, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.lda.cor.mean = acc.confusion.vec(WP.lda.pred.mean, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.lda.cor.se = acc.confusion.vec(WP.lda.pred.se, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.lda.cor.worst = acc.confusion.vec(WP.lda.pred.worst, WP.class, percent = TRUE, uniq = uniq.wp)
+
+WP.qda.cor = acc.confusion.vec(WP.qda.pred, WP.clasi$WP.class, percent = TRUE, uniq = uniq.wp)
+WP.qda.cor.mean = acc.confusion.vec(WP.qda.pred.mean, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.qda.cor.se = acc.confusion.vec(WP.qda.pred.se, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.qda.cor.worst = acc.confusion.vec(WP.qda.pred.worst, WP.class, percent = TRUE, uniq = uniq.wp)
+
+WP.lda.cor.eq = acc.confusion.vec(WP.lda.pred.eq, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.lda.cor.mean.eq = acc.confusion.vec(WP.lda.pred.mean.eq, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.lda.cor.se.eq = acc.confusion.vec(WP.lda.pred.se.eq, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.lda.cor.worst.eq = acc.confusion.vec(WP.lda.pred.worst.eq, WP.class, percent = TRUE, uniq = uniq.wp)
+
+WP.qda.cor.eq = acc.confusion.vec(WP.qda.pred.eq, WP.clasi$WP.class, percent = TRUE, uniq = uniq.wp)
+WP.qda.cor.mean.eq = acc.confusion.vec(WP.qda.pred.mean, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.qda.cor.se.eq = acc.confusion.vec(WP.qda.pred.se.eq, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.qda.cor.worst.eq = acc.confusion.vec(WP.qda.pred.worst.eq, WP.class, percent = TRUE, uniq = uniq.wp)
+
+name.methods = matrix(c(
+  "Linear", "WP", "Training", "Linear", "WP.mean", "Training", "Linear", "WP.se", "Training", "Linear", "WP.worst", "Training",
+  "Linear", "WP", "Equal", "Linear", "WP.mean", "Equal", "Linear", "WP.se", "Equal", "Linear", "WP.worst", "Equal",
+  "Quadratic", "WP", "Training", "Quadratic", "WP.mean", "Training", "Quadratic", "WP.se", "Training", "Quadratic", "WP.worst", "Training",
+  "Quadratic", "WP", "Equal", "Quadratic", "WP.mean", "Equal", "Quadratic", "WP.se", "Equal", "Quadratic", "WP.worst", "Equal"
+  
+), byrow = TRUE, nrow = 16, ncol = 3)
+
+WP.proportion.cor = as.data.frame(cbind(name.methods, rbind(WP.lda.cor, WP.lda.cor.mean, WP.lda.cor.se, WP.lda.cor.worst,
+                                                         WP.lda.cor.eq,WP.lda.cor.mean.eq,WP.lda.cor.se.eq,WP.lda.cor.worst.eq,
+                                                         WP.qda.cor,WP.qda.cor.mean,WP.qda.cor.se,WP.qda.cor.worst,
+                                                         WP.qda.cor.eq,WP.qda.cor.mean.eq,WP.qda.cor.se.eq,WP.qda.cor.worst.eq)))
+
+colnames(WP.proportion.cor) = c("DA Type", "Data set", "Priors", "R", "N", "Overall", "Total")
+
+WP.proportion.cor
+
+confusionMatrix(WP.lda.pred.mean, WP.class)
+
+```
+
+
+## Clustering
+
+Plotting the hclust results of most popular hieracical clustering methods shows that there is too much data to work with and produce useable data.  The sampled data shows that only the ward.2d produces a good result however it was taken from sampled data.
+
+```{r}
+
+WD.cluster.samples = plot.create.samples(WD, WD.class, plot.dend, percent = .1)
+
+```
+
+## Nearest Neighbor
+
+### Diagnostic Data
+
+```{r}
+
+WD.nn = knn.cv(WD, WD.class, k = 1)
+WD.nn.mean = knn.cv(WD.mean, WD.class, k = 1)
+WD.nn.se = knn.cv(WD.se, WD.class, k = 1)
+WD.nn.worst = knn.cv(WD.worst, WD.class, k = 1)
+
+WD.nn.cor = acc.confusion.vec(WD.nn, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.nn.cor.mean = acc.confusion.vec(WD.nn.mean, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.nn.cor.se = acc.confusion.vec(WD.nn.se, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.nn.cor.worst = acc.confusion.vec(WD.nn.worst, WD.class, percent = TRUE, uniq = uniq.wd)
+
+name.methods = matrix(c("WD", "WD.mean", "WD.se", "WD.worst") , byrow = TRUE, nrow = 4, ncol = 1)
+
+WD.nn.cor.df = as.data.frame(cbind(name.methods, rbind(WD.nn.cor, WD.nn.cor.mean, WD.nn.cor.se, WD.nn.cor.worst)))
+
+colnames(WD.nn.cor.df) = c("Data set", "M", "B", "Overall", "Total")
+
+WD.nn.cor.df
+
+```
+
+```{r}
+
+confusionMatrix(WD.nn, WD.class)
+
+```
+
+```{r}
+
+confusionMatrix(WD.nn.mean, WD.class)
+
+```
+
+```{r}
+
+confusionMatrix(WD.nn.se, WD.class)
+
+```
+
+```{r}
+
+confusionMatrix(WD.nn.worst, WD.class)
+
+```
+
+### Prognostic Data
+
+```{r}
+
+WP.nn = knn.cv(WP, WP.class, k = 1)
+WP.nn.mean = knn.cv(WP.mean, WP.class, k = 1)
+WP.nn.se = knn.cv(WP.se, WP.class, k = 1)
+WP.nn.worst = knn.cv(WP.worst, WP.class, k = 1)
+
+WP.nn.cor = acc.confusion.vec(WP.nn, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.nn.cor.mean = acc.confusion.vec(WP.nn.mean, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.nn.cor.se = acc.confusion.vec(WP.nn.se, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.nn.cor.worst = acc.confusion.vec(WP.nn.worst, WP.class, percent = TRUE, uniq = uniq.wp)
+
+name.methods = matrix(c("WP", "WP.mean", "WP.se", "WP.worst") , byrow = TRUE, nrow = 4, ncol = 1)
+
+WP.nn.cor.df = as.data.frame(cbind(name.methods, rbind(WP.nn.cor, WP.nn.cor.mean, WP.nn.cor.se, WP.nn.cor.worst)))
+
+colnames(WP.nn.cor.df) = c("Data set", "R", "N", "Overall", "Total")
+
+WP.nn.cor.df
+
+```
+
+```{r}
+
+confusionMatrix(WP.nn, WP.class)
+
+```
+
+```{r}
+
+confusionMatrix(WP.nn.mean, WP.class)
+
+```
+
+```{r}
+
+confusionMatrix(WP.nn.se, WP.class)
+
+```
+
+```{r}
+
+confusionMatrix(WP.nn.worst, WP.class)
+
+```
+
+## K Nearest nieghbor
+
+### Diagnostic Data
+
+```{r}
+
+determine.k.cv(WD, WD.class)
+determine.k.cv(WD.mean, WD.class)
+determine.k.cv(WD.se, WD.class)
+determine.k.cv(WD.worst, WD.class)
+
+```
+
+```{r}
+
+WD.knn = knn.cv(WD, WD.class, k = 8)
+WD.knn.mean = knn.cv(WD.mean, WD.class, k = 4)
+WD.knn.se = knn.cv(WD.se, WD.class, k = 9)
+WD.knn.worst = knn.cv(WD.worst, WD.class, k = 4)
+
+WD.knn.cor = acc.confusion.vec(WD.knn, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.knn.cor.mean = acc.confusion.vec(WD.knn.mean, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.knn.cor.se = acc.confusion.vec(WD.knn.se, WD.class, percent = TRUE, uniq = uniq.wd)
+WD.knn.cor.worst = acc.confusion.vec(WD.knn.worst, WD.class, percent = TRUE, uniq = uniq.wd)
+
+name.methods = matrix(c("WD", "WD.mean", "WD.se", "WD.worst") , byrow = TRUE, nrow = 4, ncol = 1)
+
+WD.knn.cor.df = as.data.frame(cbind(name.methods, rbind(WD.knn.cor, WD.knn.cor.mean, WD.knn.cor.se, WD.knn.cor.worst)))
+
+colnames(WD.knn.cor.df) = c("Data set", "M", "B", "Overall", "Total")
+
+WD.knn.cor.df
+
+```
+
+```{r}
+
+confusionMatrix(WD.knn, WD.class)
+
+```
+
+```{r}
+
+confusionMatrix(WD.knn.mean, WD.class)
+
+```
+
+```{r}
+
+confusionMatrix(WD.knn.se, WD.class)
+
+```
+
+```{r}
+
+confusionMatrix(WD.knn.worst, WD.class)
+
+```
+
+### Prognostic Data
+
+```{r}
+
+determine.k.cv(WP, WP.class)
+determine.k.cv(WP.mean, WP.class)
+determine.k.cv(WP.se, WP.class)
+determine.k.cv(WP.worst, WP.class)
+
+```
+
+```{r}
+
+WP.knn = knn.cv(WP, WP.class, k = 8)
+WP.knn.mean = knn.cv(WP.mean, WP.class, k = 8)
+WP.knn.se = knn.cv(WP.se, WP.class, k = 9)
+WP.knn.worst = knn.cv(WP.worst, WP.class, k = 9)
+
+WP.knn.cor = acc.confusion.vec(WP.knn, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.knn.cor.mean = acc.confusion.vec(WP.knn.mean, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.knn.cor.se = acc.confusion.vec(WP.knn.se, WP.class, percent = TRUE, uniq = uniq.wp)
+WP.knn.cor.worst = acc.confusion.vec(WP.knn.worst, WP.class, percent = TRUE, uniq = uniq.wp)
+
+name.methods = matrix(c("WP", "WP.mean", "WP.se", "WP.worst") , byrow = TRUE, nrow = 4, ncol = 1)
+
+WP.knn.cor.df = as.data.frame(cbind(name.methods, rbind(WP.knn.cor, WP.knn.cor.mean, WP.knn.cor.se, WP.knn.cor.worst)))
+
+colnames(WP.knn.cor.df) = c("Data set", "R", "N", "Overall", "Total")
+
+WP.knn.cor.df
+
+```
+
+```{r}
+
+confusionMatrix(WP.knn, WP.class)
+
+```
+
+```{r}
+
+confusionMatrix(WP.knn.mean, WP.class)
+
+```
+
+```{r}
+
+confusionMatrix(WP.knn.se, WP.class)
+
+```
+
+```{r}
+
+confusionMatrix(WP.knn.worst, WP.class)
+
+```
+
+## Linear Regression
+
+```{r}
+
+# Change class data into proper form.
+
+WD.clasi = cbind(WD.class.num, WD)
+WD.clasi.mean = cbind(WD.class.num, WD.mean)
+WD.clasi.se = cbind(WD.class.num, WD.se)
+WD.clasi.worst = cbind(WD.class.num, WD.worst)
+
+WP.clasi = cbind(WP.class.num, WP)
+WP.clasi.mean = cbind(WP.class.num, WP.mean)
+WP.clasi.se = cbind(WP.class.num, WP.se)
+WP.clasi.worst = cbind(WP.class.num, WP.worst)
+
+```
+
+### Diagnostic Data
+
+```{r}
+
+WD.glm = glm(formula = WD.class.num ~ ., data = WD.clasi, family = binomial(link = "logit"))
+summary(WD.glm)
+
+WD.glm.cv.pred = predict(WD.glm, newdata = WD.clasi, type = "response")
+
+cutoff = .5
+WD.glm.pred.cut = ifelse(WD.glm.cv.pred > cutoff, "B", "M")
+WD.glm.pred.cut = as.factor(WD.glm.pred.cut)
+
+
+WD.glm.cor = acc.confusion.vec(WD.glm.pred.cut, WD.class, percent = TRUE)
+
+```
+
+```{r}
+
+Anova(WD.glm)
+
+```
+
+```{r}
+
+WD.glm.mean = glm(formula = WD.class.num ~ ., data = WD.clasi.mean, family = binomial(link = "logit"))
+summary(WD.glm.mean)
+
+WD.glm.cv.pred = predict(WD.glm.mean, newdata = WD.clasi.mean, type = "response")
+
+cutoff = .5
+WD.glm.pred.cut = ifelse(WD.glm.cv.pred < cutoff, "B", "M")
+WD.glm.pred.cut = as.factor(WD.glm.pred.cut)
+
+WD.glm.cor.mean = acc.confusion.vec(WD.glm.pred.cut, WD.class, percent = TRUE)
+
+```
+
+```{r}
+
+Anova(WD.glm.mean)
+
+```
+
+```{r}
+
+WD.glm.se = glm(formula = WD.class.num ~ ., data = WD.clasi.se, family = binomial(link = "logit"))
+summary(WD.glm.se)
+
+WD.glm.cv.pred = predict(WD.glm.se, newdata = WD.clasi.se, type = "response")
+
+cutoff = .5
+WD.glm.pred.cut = ifelse(WD.glm.cv.pred < cutoff, "B", "M")
+WD.glm.pred.cut = as.factor(WD.glm.pred.cut)
+
+WD.glm.cor.se = acc.confusion.vec(WD.glm.pred.cut, WD.class, percent = TRUE)
+
+```
+
+```{r}
+
+Anova(WD.glm.se)
+
+```
+
+```{r}
+
+WD.glm.worst = glm(formula = WD.class.num ~ ., data = WD.clasi.worst, family = binomial(link = "logit"))
+summary(WD.glm.worst)
+
+WD.glm.cv.pred = predict(WD.glm.worst, newdata = WD.clasi.worst, type = "response")
+
+cutoff = .5
+WD.glm.pred.cut = ifelse(WD.glm.cv.pred < cutoff, "B", "M")
+WD.glm.pred.cut = as.factor(WD.glm.pred.cut)
+
+WD.glm.cor.worst = acc.confusion.vec(WD.glm.pred.cut, WD.class, percent = TRUE)
+
+```
+
+```{r}
+
+Anova(WD.glm.se)
+
+```
+
+```{r}
+
+name.methods = matrix(c("WD", "WD.mean", "WD.se", "WD.worst") , byrow = TRUE, nrow = 4, ncol = 1)
+
+WD.glm.cor.df = as.data.frame(cbind(name.methods, rbind(WD.glm.cor, WD.glm.cor.mean, WD.glm.cor.se, WD.glm.cor.worst)))
+
+colnames(WD.glm.cor.df) = c("Data set", "B", "M", "Overall", "Total")
+
+WD.glm.cor.df
+
+```
+
+### Prognostic Data 
+
+
+```{r}
+
+WP.glm = glm(formula = WP.class.num ~ ., data = WP.clasi, family = binomial(link = "logit"))
+summary(WP.glm)
+
+WP.glm.pred = predict(WP.glm, neWPata = WP.clasi, type = "response")
+
+cutoff = .5
+WP.glm.pred.cut = ifelse(WP.glm.pred < cutoff, "N", "R")
+WP.glm.pred.cut = as.factor(WP.glm.pred.cut)
+
+WP.class
+
+WP.glm.cor = acc.confusion.vec(WP.glm.pred.cut, WP.class, percent = TRUE, uniq = uniq.wp)
+
+```
+
+```{r}
+
+Anova(WP.glm)
+
+```
+
+```{r}
+
+WP.glm.mean = glm(formula = WP.class.num ~ ., data = WP.clasi.mean, family = binomial(link = "logit"))
+summary(WP.glm.mean)
+
+WP.glm.cv.pred = predict(WP.glm.mean, neWPata = WP.clasi.mean, type = "response")
+
+cutoff = .5
+WP.glm.pred.cut = ifelse(WP.glm.cv.pred < cutoff, "N", "R")
+WP.glm.pred.cut = as.factor(WP.glm.pred.cut)
+
+WP.glm.cor.mean = acc.confusion.vec(WP.glm.pred.cut, WP.class, percent = TRUE, uniq = uniq.wp)
+
+```
+
+```{r}
+
+Anova(WP.glm.mean)
+
+```
+
+```{r}
+
+WP.glm.se = glm(formula = WP.class.num ~ ., data = WP.clasi.se, family = binomial(link = "logit"))
+summary(WP.glm.se)
+
+WP.glm.pred = predict(WP.glm.se, neWPata = WP.clasi.se, type = "response")
+
+cutoff = .5
+WP.glm.pred.cut = ifelse(WP.glm.pred < cutoff, "N", "R")
+WP.glm.pred.cut = as.factor(WP.glm.pred.cut)
+
+WP.glm.cor.se = acc.confusion.vec(WP.glm.pred.cut, WP.class, percent = TRUE, uniq = uniq.wp)
+
+```
+
+```{r}
+
+Anova(WP.glm.se)
+
+```
+
+```{r}
+
+WP.glm.worst = glm(formula = WP.class.num ~ ., data = WP.clasi.worst, family = binomial(link = "logit"))
+summary(WP.glm.worst)
+
+WP.glm.pred = predict(WP.glm.worst, neWPata = WP.clasi.worst, type = "response")
+
+WP.glm.pred
+
+cutoff = .5
+WP.glm.pred.cut = ifelse(WP.glm.pred < cutoff, "N", "R")
+WP.glm.pred.cut = as.factor(WP.glm.pred.cut)
+
+WP.glm.pred.cut
+
+WP.glm.cor.worst = acc.confusion.vec(WP.glm.pred.cut, WP.class, percent = TRUE, uniq = uniq.wp)
+
+```
+
+```{r}
+
+Anova(WP.glm.se)
+
+```
+
+```{r}
+
+name.methods = matrix(c("WP", "WP.mean", "WP.se", "WP.worst") , byrow = TRUE, nrow = 4, ncol = 1)
+
+WP.glm.cor.df = as.data.frame(cbind(name.methods, rbind(WP.glm.cor, WP.glm.cor.mean, WP.glm.cor.se, WP.glm.cor.worst)))
+
+colnames(WP.glm.cor.df) = c("Data set", "R", "N", "Overall", "Total")
+
+WP.glm.cor.df
+
+```
+
+# TSNE Classification
+
+Used for the classification is all of the methods used above on each of the 2 dimensional tuned plots of the data after a TSNE algorithm completion.
+
+```{r}
+
+WD.tsne.cor.df
+
+```
+
+```{r}
+
+WD.tsne.mean.cor.df
+
+```
+
+```{r}
+
+WD.tsne.se.cor.df
+
+```
+
+```{r}
+
+WD.tsne.worst.cor.df
+
+```
+
+```{r}
+
+WP.tsne.cor.df
+
+```
+
+```{r}
+
+WP.tsne.mean.cor.df
+
+```
+
+```{r}
+
+WP.tsne.se.cor.df
+
+```
+
+```{r}
+
+WP.tsne.worst.cor.df
+
+```
+
+# Choosen variables
+
+### Diagnostic data
+
+```{r}
+
+par(mfrow = c(1,2))
+seed()
+sample.tbl.col.func(WD.mean, WD.class.col, parcoord, main = "Parco graph of Diagnostic Mean data")
+seed()
+sample.tbl.col.func(WD.worst, WD.class.col, parcoord, main = "Parco graph of Diagnostic Worst data")
+
+```
+
+```{r}
+
+summary(GG.WD)
+
+```
+
+```{r}
+
+sample.tbl.col.func(GG.WD, WD.class.col, pairs)
+
+```
+
+```{r}
+
+stars(GG.WD[1:55,], labels = as.character(WD.class[1:55]), key.loc = c(19,1), draw.segments = TRUE)
+
+```
+
+```{r}
+
+# Dimensions are correlated.
+# As you may notice Radius has a large correlation with area and perimeter.
+
+ggcorr(GG.WD)
+
+```
+
+```{r}
+
+seed()
+sample.tbl.col.func(GG.WD, WD.class.col, parcoord, percent = .2, main = "Parco graph of Diagnostic relevant data")
+
+```
+
+```{r}
+
+GG.WD.pca = princomp(GG.WD)
+summary(GG.WD.pca)
+
+print(GG.WD.pca$loadings, cutoff = .3)
+
+```
+
+```{r}
+
+plot.pca.scree(pca = GG.WD.pca, ylab = "Cumulative variance", xlab = "PC", main = "WD GG")
+
+```
+
+```{r}
+
+plot.pca.bubble(GG.WD, WD.class.col, pca = GG.WD.pca)
+
+```
+
+```{r}
+
+plot.pca.3d(GG.WD, WD.class.col, pca = GG.WD.pca)
+
+```
+
+```{r}
+
+seed()
+
+GG.WD.tsne = do.tsne(GG.WD, perplexity = 25, BarnesHut = TRUE, maxiter = 5000)
+
+plot(GG.WD.tsne$Y, col = WD.class.col)
+
+```
+
+## Discriminant Analysis
+
+```{r}
+
+GG.WD.lda = lda(formula = GG.WD.clasi$WD.class ~ ., data = GG.WD.clasi, CV = TRUE)
+GG.WD.lda.pred = GG.WD.lda$class
+GG.WD.qda = qda(formula = GG.WD.clasi$WD.class ~ ., data = GG.WD.clasi, CV = TRUE)
+GG.WD.qda.pred = na.omit(GG.WD.qda$class)
+GG.WD.lda.eq = lda(formula = GG.WD.clasi$WD.class ~ ., data = GG.WD.clasi, CV = TRUE, prior = c(1,1)/2)
+GG.WD.lda.pred.eq = GG.WD.lda.eq$class
+GG.WD.qda.eq = qda(formula = GG.WD.clasi$WD.class ~ ., data = GG.WD.clasi, CV = TRUE, prior = c(1,1)/2)
+GG.WD.qda.pred.eq = na.omit(GG.WD.qda.eq$class)
+
+```
+
+```{r}
+
+GG.WD.lda.cor = acc.confusion.vec(GG.WD.lda.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+GG.WD.qda.cor = acc.confusion.vec(GG.WD.qda.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+GG.WD.lda.cor.eq = acc.confusion.vec(GG.WD.lda.pred.eq, WD.class, percent = TRUE, uniq = uniq.wd)
+GG.WD.qda.cor.eq = acc.confusion.vec(GG.WD.qda.pred.eq, WD.class, percent = TRUE, uniq = uniq.wd)
+
+```
+
+## Nearest Neighbor
+
+```{r}
+
+GG.WD.nn = knn.cv(GG.WD, WD.class, k = 1)
+
+GG.WD.nn.cor = acc.confusion.vec(GG.WD.nn, WD.class, percent = TRUE, uniq = uniq.wd)
+
+```
+
+## K Nearest Neighbor
+
+```{r}
+
+determine.k.cv(GG.WD, WD.class)
+
+```
+
+```{r}
+
+GG.WD.knn = knn.cv(GG.WD, WD.class, k = 3)
+
+GG.WD.knn.cor = acc.confusion.vec(GG.WD.knn, WD.class, percent = TRUE, uniq = uniq.wd)
+
+```
+
+## Linear Regression
+
+```{r}
+
+GG.WD.clasi = cbind(WD.class.num, GG.WD)
+
+```
+
+```{r}
+
+GG.WD.glm = glm(formula = WD.class.num ~ ., data = GG.WD.clasi, family = binomial())
+summary(GG.WD.glm)
+
+GG.WD.glm.pred = predict(GG.WD.glm, neWPata = GG.WD.clasi, type = "response")
+
+cutoff = .5
+GG.WD.glm.pred = ifelse(GG.WD.glm.pred < cutoff, "B", "M")
+GG.WD.glm.pred = as.factor(GG.WD.glm.pred)
+
+GG.WD.glm.cor = acc.confusion.vec(GG.WD.glm.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+
+```
+
+```{r}
+
+Anova(GG.WD.glm)
+
+```
+
+```{r}
+
+name.methods = matrix(c(
+  "Linear", "Training", "NA",
+  "Linear", "Equal", "NA",
+  "Quadratic", "Training", "NA", 
+  "Quadratic", "Equal", "NA",
+  "Nearest N", "NA", "1",
+  "K Nearest", "NA", "3",
+  "Linear Re", "NA", "NA"
+  ), byrow = TRUE, nrow = 7, ncol = 3)
+
+GG.WD.cor.df = as.data.frame(cbind(name.methods, rbind(GG.WD.lda.cor, GG.WD.lda.cor.eq, GG.WD.qda.cor, GG.WD.qda.cor.eq, GG.WD.nn.cor, GG.WD.knn.cor, GG.WD.glm.cor)))
+
+colnames(GG.WD.cor.df) = c("Type", "Priors","k", "M", "B", "Overall", "Total")
+
+GG.WD.cor.df
+
+```
+
+```{r}
+
+summary(GG2.WD)
+
+```
+
+```{r}
+
+sample.tbl.col.func(GG2.WD, WD.class.col, pairs)
+
+```
+
+```{r}
+
+stars(GG2.WD[1:55,], labels = as.character(WD.class[1:55]), key.loc = c(19,1), draw.segments = TRUE)
+
+```
+
+```{r}
+
+# Dimensions are correlated.
+# As you may notice Radius has a large correlation with area and perimeter.
+
+ggcorr(GG2.WD)
+
+```
+
+```{r}
+
+seed()
+sample.tbl.col.func(GG2.WD, WD.class.col, parcoord, percent = .2, main = "Parco graph of Diagnostic total data")
+
+```
+
+```{r}
+
+GG2.WD.pca = princomp(GG2.WD)
+summary(GG2.WD.pca)
+
+```
+
+```{r}
+
+plot.pca.scree(pca = GG2.WD.pca, ylab = "Cumulative variance", xlab = "PC", main = "WD GG2")
+
+```
+
+```{r}
+
+plot.pca.bubble(GG2.WD, WD.class.col, pca = GG2.WD.pca)
+
+```
+
+```{r}
+
+plot.pca.3d(GG2.WD, WD.class.col, pca = GG2.WD.pca)
+
+```
+
+```{r}
+
+plot3d(GG2.WD, col = WD.class.col)
+
+```
+
+```{r}
+
+seed()
+
+GG2.WD.tsne = do.tsne(GG2.WD, perplexity = 30, pca = FALSE, BarnesHut = TRUE, maxiter = 6000)
+
+plot(GG2.WD.tsne$Y, col = WD.class.col)
+
+```
+
+## Discriminant Analysis
+
+```{r}
+
+GG2.WD.lda = lda(formula = GG2.WD.clasi$WD.class ~ ., data = GG2.WD.clasi, CV = TRUE)
+GG2.WD.lda.pred = GG2.WD.lda$class
+GG2.WD.qda = qda(formula = GG2.WD.clasi$WD.class ~ ., data = GG2.WD.clasi, CV = TRUE)
+GG2.WD.qda.pred = na.omit(GG2.WD.qda$class)
+GG2.WD.lda.eq = lda(formula = GG2.WD.clasi$WD.class ~ ., data = GG2.WD.clasi, CV = TRUE, prior = c(1,1)/2)
+GG2.WD.lda.pred.eq = GG2.WD.lda.eq$class
+GG2.WD.qda.eq = qda(formula = GG2.WD.clasi$WD.class ~ ., data = GG2.WD.clasi, CV = TRUE, prior = c(1,1)/2)
+GG2.WD.qda.pred.eq = na.omit(GG2.WD.qda.eq$class)
+
+```
+
+```{r}
+GG2.WD.lda.cor = acc.confusion.vec(GG2.WD.lda.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+GG2.WD.qda.cor = acc.confusion.vec(GG2.WD.qda.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+GG2.WD.lda.cor.eq = acc.confusion.vec(GG2.WD.lda.pred.eq, WD.class, percent = TRUE, uniq = uniq.wd)
+GG2.WD.qda.cor.eq = acc.confusion.vec(GG2.WD.qda.pred.eq, WD.class, percent = TRUE, uniq = uniq.wd)
+
+```
+
+```{r}
+
+GG2.WD.nn = knn.cv(GG2.WD, WD.class, k = 1)
+
+GG2.WD.nn.cor = acc.confusion.vec(GG2.WD.nn, WD.class, percent = TRUE, uniq = uniq.wd)
+
+```
+
+```{r}
+
+determine.k.cv(GG2.WD, WD.class)
+
+```
+
+```{r}
+
+GG2.WD.knn = knn.cv(GG2.WD, WD.class, k = 4)
+
+GG2.WD.knn.cor = acc.confusion.vec(GG2.WD.knn, WD.class, percent = TRUE, uniq = uniq.wd)
+
+```
+
+```{r}
+
+GG2.WD.clasi = cbind(WD.class.num, GG2.WD)
+
+```
+
+```{r}
+
+GG2.WD.glm = glm(data = GG2.WD.clasi, formula = GG2.WD.clasi$WD.class.num ~ ., family = binomial(link = "logit"), control = glm.control(maxit=1))
+summary(GG2.WD.glm)
+
+GG2.WD.glm.pred = predict(GG2.WD.glm, neWData = GG2.WD.clasi, type = "response")
+
+cutoff = .5
+GG2.WD.glm.pred = ifelse(GG2.WD.glm.pred < cutoff, "B", "M")
+GG2.WD.glm.pred = as.factor(GG2.WD.glm.pred)
+
+GG2.WD.glm.cor = acc.confusion.vec(GG2.WD.glm.pred, WD.class, percent = TRUE, uniq = uniq.wd)
+
+```
+
+```{r}
+
+Anova(GG2.WD.glm)
+
+```
+
+```{r}
+
+name.methods = matrix(c(
+  "Linear", "Training", "NA",
+  "Linear", "Equal", "NA", 
+  "Quadratic", "Training", "NA", 
+  "Quadratic", "Equal", "NA",
+  "Nearest N", "NA", "1",
+  "K Nearest", "NA", "4",
+  "Linear Re", "NA", "NA"
+  ), byrow = TRUE, nrow = 7, ncol = 3)
+
+GG2.WD.cor.df = as.data.frame(cbind(name.methods, rbind(GG2.WD.lda.cor, GG2.WD.lda.cor.eq, GG2.WD.qda.cor, GG2.WD.qda.cor.eq, GG2.WD.nn.cor, GG2.WD.knn.cor, GG2.WD.glm.cor)))
+
+colnames(GG2.WD.cor.df) = c("Type", "Priors","k", "M", "B", "Overall", "Total")
+
+GG2.WD.cor.df
+
+```
+
+### Prognostic data
+
+Is harder to tell which variables should be used for getting a final classification, used in this is the most important variables gathered from the data from ANOVA and coefficients of the glm data.
+
+```{r}
+
+# smoothness fractal lymph, Texture concave points lymph, smoothness lymph
+
+GG.WP = as.data.frame(cbind(WP.mean[,"smoothness"], WP.mean[,"fractal dimension"], WP.mean[,"lymph node status"],
+              WP.se[,"Texture  SE"], WP.se[,"concave points  SE"], WP.worst[,"smoothness  Worst"]))
+colnames(GG.WP) = c("smoothness", " fractal dimension", "lymph node", "texture se", "concave points se", "smoothness worst")
+
+```
+
+```{r}
+
+summary(GG.WP)
+
+```
+
+```{r}
+
+sample.tbl.col.func(GG.WP, WP.class.col, pairs)
+
+```
+
+```{r}
+
+stars(GG.WP[1:55,], labels = as.character(WP.class[1:55]), key.loc = c(19,1), draw.segments = TRUE)
+
+```
+
+```{r}
+
+# Dimensions are correlated.
+# As you may notice Radius has a large correlation with area and perimeter.
+
+ggcorr(GG.WP)
+
+```
+
+```{r}
+
+seed()
+sample.tbl.col.func(GG.WP, WP.class.col, parcoord, percent = .3, main = "Parco graph of Prognostic relevant data")
+
+
+```
+
+```{r}
+
+GG.WP.pca = princomp(GG.WP)
+
+print(GG.WP.pca$loadings, cutoff = .3)
+
+summary(GG.WP.pca)
+
+```
+
+```{r}
+
+plot.pca.scree(pca = GG.WP.pca, ylab = "Cumulative variance", xlab = "PC", main = "GG WP pca")
+
+```
+
+```{r}
+
+plot.pca.bubble(GG.WP, WP.class.col, pca = GG.WP.pca)
+
+```
+
+```{r}
+
+plot.pca.3d(GG.WP, WP.class.col, pca = GG.WP.pca)
+
+```
+
+```{r}
+
+seed()
+
+GG.WP.tsne = do.tsne(GG.WP, perplexity = 25, pca = FALSE, BarnesHut = TRUE, maxiter = 6000)
+
+plot(GG.WP.tsne$Y, col = WP.class.col)
+
+```
+
+
+## Discriminant Analysis
+
+```{r}
+
+GG.WP.lda = lda(formula = GG.WP.clasi$WP.class ~ ., data = GG.WP.clasi, CV = TRUE)
+GG.WP.lda.pred = GG.WP.lda$class
+GG.WP.qda = qda(formula = GG.WP.clasi$WP.class ~ ., data = GG.WP.clasi, CV = TRUE)
+GG.WP.qda.pred = na.omit(GG.WP.qda$class)
+GG.WP.lda.eq = lda(formula = GG.WP.clasi$WP.class ~ ., data = GG.WP.clasi, CV = TRUE, prior = c(1,1)/2)
+GG.WP.lda.pred.eq = GG.WP.lda.eq$class
+GG.WP.qda.eq = qda(formula = GG.WP.clasi$WP.class ~ ., data = GG.WP.clasi, CV = TRUE, prior = c(1,1)/2)
+GG.WP.qda.pred.eq = na.omit(GG.WP.qda.eq$class)
+
+```
+
+```{r}
+
+GG.WP.lda.cor = acc.confusion.vec(GG.WP.lda.pred, WP.class, percent = TRUE, uniq = uniq.wp)
+GG.WP.qda.cor = acc.confusion.vec(GG.WP.qda.pred, WP.class, percent = TRUE, uniq = uniq.wp)
+GG.WP.lda.cor.eq = acc.confusion.vec(GG.WP.lda.pred.eq, WP.class, percent = TRUE, uniq = uniq.wp)
+GG.WP.qda.cor.eq = acc.confusion.vec(GG.WP.qda.pred.eq, WP.class, percent = TRUE, uniq = uniq.wp)
+
+```
+
+```{r}
+
+GG.WP.nn = knn.cv(GG.WP, WP.class, k = 1)
+
+GG.WP.nn.cor = acc.confusion.vec(GG.WP.nn, WP.class, percent = TRUE, uniq = uniq.wp)
+
+```
+
+```{r}
+
+determine.k.cv(GG.WP, WP.class)
+
+```
+
+```{r}
+
+GG.WP.knn = knn.cv(GG.WP, WP.class, k = 8)
+
+GG.WP.knn.cor = acc.confusion.vec(GG.WP.knn, WP.class, percent = TRUE, uniq = uniq.wp)
+
+```
+
+```{r}
+
+GG.WP.clasi = cbind(GG.WP, WP.class.num)
+
+GG.WP.glm = glm(data = GG.WP.clasi, formula = GG.WP.clasi$WP.class.num ~ ., family = binomial(link = "logit"))
+
+GG.WP.glm.pred = predict(GG.WP.glm, neWPata = GG.WD.clasi, type = "response")
+
+
+
+cutoff = .5
+GG.WP.glm.pred = ifelse(GG.WP.glm.pred < cutoff, "N", "R")
+GG.WP.glm.pred = as.factor(GG.WP.glm.pred)
+
+GG.WP.glm.pred
+
+GG.WP.glm.cor = acc.confusion.vec(GG.WP.glm.pred, WP.class, percent = TRUE, uniq = uniq.wp)
+
+```
+
+```{r}
+
+Anova(GG.WP.glm)
+
+```
+
+```{r}
+
+name.methods = matrix(c(
+  "Linear", "Training", "NA",
+  "Linear", "Equal", "NA", 
+  "Quadratic", "Training", "NA", 
+  "Quadratic", "Equal", "NA",
+  "Nearest N", "NA", "1",
+  "K Nearest", "NA", "8",
+  "Linear Re", "NA", "NA"
+  ), byrow = TRUE, nrow = 7, ncol = 3)
+
+GG.WP.cor.df = as.data.frame(cbind(name.methods, rbind(GG.WP.lda.cor, GG.WP.lda.cor.eq, GG.WP.qda.cor, GG.WP.qda.cor.eq, GG.WP.nn.cor, GG.WP.knn.cor, GG.WP.glm.cor)))
+
+colnames(GG.WP.cor.df) = c("Type", "Priors","k", "R", "N", "Overall", "Total")
+
+GG.WP.cor.df
+
+```
+
+
+
